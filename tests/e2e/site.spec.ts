@@ -119,14 +119,16 @@ test("shows contact form submission feedback in the action area", async ({ page 
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByRole("button", { name: "Sending your message" })).toBeDisabled();
   await expect(form.getByText("Sending…")).toBeVisible();
-  await expect(form.locator(".contact-form__success-title")).toBeVisible();
-  await expect(form.locator(".contact-form__submit")).toBeHidden();
+  await expect(form.locator(".contact-form__success-copy")).toBeVisible();
+  await expect(form.locator(".contact-form__content")).toBeHidden();
+  await expect(form.locator(".cf-turnstile")).toBeHidden();
   await expect(
     form.getByRole("button", { name: "Send another message" })
   ).toBeVisible();
 
   await form.getByRole("button", { name: "Send another message" }).click();
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
+  await expect(form.locator(".cf-turnstile")).toBeVisible();
 });
 
 test("renders the approved location map on Who We Are", async ({ page }) => {
