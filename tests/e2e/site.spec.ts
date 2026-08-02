@@ -120,6 +120,7 @@ test("shows contact form submission feedback in the action area", async ({ page 
   await expect(page.getByRole("button", { name: "Sending your message" })).toBeDisabled();
   await expect(form.getByText("Sending…")).toBeVisible();
   await expect(form.locator(".contact-form__success-title")).toBeVisible();
+  await expect(form.locator(".contact-form__submit")).toBeHidden();
   await expect(
     form.getByRole("button", { name: "Send another message" })
   ).toBeVisible();
