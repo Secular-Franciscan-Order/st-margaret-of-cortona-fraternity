@@ -88,11 +88,44 @@ test("renders a contact form with static contact information", async ({ page }) 
   await expect(page.getByLabel("Last Name")).toBeVisible();
   await expect(page.getByLabel(/Email/)).toHaveAttribute("required", "");
   await expect(page.getByLabel("Message")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(page.locator(".cf-turnstile")).toHaveAttribute(
     "data-sitekey",
     "0x4AAAAAAEERQmwQp-jP4ygz"
   );
+});
+
+test("shows contact form submission feedback in the action area", async ({ page }) => {
+  await page.route("**/api/contact", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Thank you. Your message has been sent." })
+    });
+  });
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await form.evaluate((element) => {
+    const token = element.querySelector<HTMLInputElement>(
+      '[name="cf-turnstile-response"]'
+    ) ?? document.createElement("input");
+    token.name = "cf-turnstile-response";
+    token.value = "test-token";
+    if (!token.parentElement) element.append(token);
+  });
+
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("button", { name: "Sending your message" })).toBeDisabled();
+  await expect(form.getByText("Sending…")).toBeVisible();
+  await expect(form.locator(".contact-form__success-title")).toBeVisible();
+  await expect(
+    form.getByRole("button", { name: "Send another message" })
+  ).toBeVisible();
+
+  await form.getByRole("button", { name: "Send another message" }).click();
+  await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
 });
 
 test("renders the approved location map on Who We Are", async ({ page }) => {
