@@ -66,8 +66,34 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
     data-theme="light"
   ></div>
 
-  <button class="contact-form__submit" type="submit">Send</button>
-  <p class="contact-form__status" aria-live="polite" role="status"></p>
+  <div class="contact-form__actions">
+    <button class="contact-form__submit" type="submit">
+      <span class="contact-form__submit-label">Send message</span>
+      <span class="contact-form__submit-pending" aria-hidden="true">
+        <span class="contact-form__spinner"></span>
+        Sending…
+      </span>
+    </button>
+
+    <div class="contact-form__success" hidden>
+      <svg
+        aria-hidden="true"
+        class="contact-form__success-icon"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <path d="m5 12 4.25 4.25L19 6.5" />
+      </svg>
+      <div>
+        <p class="contact-form__success-title">Message sent.</p>
+        <p class="contact-form__success-copy">We’ll be in touch soon.</p>
+      </div>
+      <button class="contact-form__reset" type="button">Send another message</button>
+    </div>
+  </div>
+
+  <p class="contact-form__status visually-hidden" aria-live="polite" role="status"></p>
+  <p class="contact-form__error" hidden role="alert"></p>
 </form>
 
 <script
@@ -89,12 +115,45 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
     const status = form.querySelector<HTMLParagraphElement>(
       ".contact-form__status"
     );
+    const errorMessage = form.querySelector<HTMLParagraphElement>(
+      ".contact-form__error"
+    );
+    const success = form.querySelector<HTMLDivElement>(
+      ".contact-form__success"
+    );
+    const resetButton = form.querySelector<HTMLButtonElement>(
+      ".contact-form__reset"
+    );
 
-    const setStatus = (message: string, isError = false) => {
-      if (!status) return;
+    const setStatus = (message: string) => {
+      if (status) status.textContent = message;
+    };
 
-      status.textContent = message;
-      status.dataset.state = isError ? "error" : "success";
+    const clearError = () => {
+      if (!errorMessage) return;
+
+      errorMessage.hidden = true;
+      errorMessage.textContent = "";
+    };
+
+    const showError = (message: string) => {
+      if (errorMessage) {
+        errorMessage.textContent = message;
+        errorMessage.hidden = false;
+      }
+      setStatus("");
+    };
+
+    const setSubmitting = (isSubmitting: boolean) => {
+      if (submitButton) {
+        submitButton.disabled = isSubmitting;
+        submitButton.setAttribute(
+          "aria-label",
+          isSubmitting ? "Sending your message" : "Send message"
+        );
+      }
+      form.dataset.state = isSubmitting ? "sending" : "idle";
+      form.setAttribute("aria-busy", String(isSubmitting));
     };
 
     form.addEventListener("submit", async (event) => {
@@ -102,15 +161,16 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
 
       if (!form.reportValidity()) return;
 
+      clearError();
       const formData = new FormData(form);
       const turnstileToken = formData.get("cf-turnstile-response");
 
       if (typeof turnstileToken !== "string" || turnstileToken.length === 0) {
-        setStatus("Please complete the verification before sending your message.", true);
+        showError("Please complete the verification before sending your message.");
         return;
       }
 
-      submitButton?.setAttribute("disabled", "");
+      setSubmitting(true);
       setStatus("Sending your message…");
 
       try {
@@ -119,24 +179,50 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
           body: formData,
           headers: { Accept: "application/json" }
         });
-        const result = (await response.json()) as { message?: string };
+        let result: { message?: string } = {};
+
+        try {
+          result = (await response.json()) as { message?: string };
+        } catch {
+          // Use the generic error below if a failed response has no JSON body.
+        }
 
         if (!response.ok) {
-          throw new Error(result.message || "We could not send your message.");
+          throw new Error(
+            result.message ||
+              "We could not send your message. Please try again or use the contact details above."
+          );
         }
 
         form.reset();
         resetTurnstile();
-        setStatus("Thank you. Your message has been sent.");
+        submitButton?.setAttribute("hidden", "");
+        success?.removeAttribute("hidden");
+        form.dataset.state = "success";
+        setStatus("Message sent. We’ll be in touch soon.");
       } catch (error) {
         const message =
-          error instanceof Error
+          error instanceof Error && error.name === "Error"
             ? error.message
-            : "We could not send your message. Please try again.";
-        setStatus(message, true);
+            : "We could not send your message. Please try again or use the contact details above.";
+        showError(message);
       } finally {
-        submitButton?.removeAttribute("disabled");
+        if (form.dataset.state !== "success") setSubmitting(false);
+        else {
+          submitButton?.removeAttribute("disabled");
+          submitButton?.setAttribute("aria-label", "Send message");
+          form.setAttribute("aria-busy", "false");
+        }
       }
+    });
+
+    resetButton?.addEventListener("click", () => {
+      success?.setAttribute("hidden", "");
+      submitButton?.removeAttribute("hidden");
+      setSubmitting(false);
+      setStatus("");
+      clearError();
+      form.querySelector<HTMLInputElement>("#contact-first-name")?.focus();
     });
   }
 </script>
