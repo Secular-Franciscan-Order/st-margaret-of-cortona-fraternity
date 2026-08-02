@@ -5,12 +5,12 @@
   "compatibility_date": "2026-06-01",
   "preview_urls": true,
   "vars": {
-    "CONTACT_RECIPIENT": "cj.ofs@hulu.casa"
+    "CONTACT_RECIPIENT": "cmalloy925@gmail.com"
   },
   "send_email": [
     {
       "name": "CONTACT_EMAIL",
-      "destination_address": "cj.ofs@hulu.casa",
+      "destination_address": "cmalloy925@gmail.com",
       "allowed_sender_addresses": [
         "contact@stmargaretofcortona.com"
       ]
