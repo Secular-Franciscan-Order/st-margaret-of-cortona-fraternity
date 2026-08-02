@@ -47,6 +47,46 @@ const getText = (formData: FormData, name: string, maxLength: number) => {
   return value.trim().slice(0, maxLength);
 };
 
+const readBoundedBody = async (
+  request: Request
+): Promise<Uint8Array<ArrayBuffer> | null> => {
+  const reader = request.body?.getReader();
+
+  if (!reader) return new Uint8Array(new ArrayBuffer(0));
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) break;
+      if (!value) continue;
+
+      if (value.byteLength > maxRequestSize - size) {
+        await reader.cancel();
+        return null;
+      }
+
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(new ArrayBuffer(size));
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return body;
+};
+
 const escapeHtml = (value: string) =>
   value.replace(/[&<>'"]/g, (character) => {
     const entities: Record<string, string> = {
@@ -112,10 +152,29 @@ const handleContactRequest = async (request: Request, env: Env) => {
     return json({ message: "Your message is too large." }, 413);
   }
 
+  let body: Uint8Array<ArrayBuffer> | null;
   let formData: FormData;
 
   try {
-    formData = await request.formData();
+    body = await readBoundedBody(request);
+  } catch {
+    return json({ message: "We could not read your message." }, 400);
+  }
+
+  if (!body) {
+    return json({ message: "Your message is too large." }, 413);
+  }
+
+  try {
+    const contentType = request.headers.get("Content-Type");
+
+    if (!contentType) {
+      return json({ message: "We could not read your message." }, 400);
+    }
+
+    formData = await new Response(body, {
+      headers: { "Content-Type": contentType }
+    }).formData();
   } catch {
     return json({ message: "We could not read your message." }, 400);
   }

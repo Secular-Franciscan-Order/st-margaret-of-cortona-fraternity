@@ -45,6 +45,7 @@ pnpm dev
 pnpm check
 pnpm check:uploads
 pnpm build
+pnpm test:worker
 pnpm test:e2e
 pnpm preview
 pnpm deploy
@@ -56,6 +57,7 @@ Important command behavior:
 - `pnpm check` runs Astro type and content checks.
 - `pnpm check:uploads` enforces local media upload limits.
 - `pnpm build` runs upload checks, Astro checks, and the static build.
+- `pnpm test:worker` runs Worker request-handling tests.
 - `pnpm test:e2e` runs Playwright smoke tests against `pnpm preview`.
 - `pnpm deploy` deploys the built site with Wrangler.
 
