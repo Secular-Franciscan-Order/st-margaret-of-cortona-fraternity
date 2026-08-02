@@ -4,6 +4,9 @@
   "main": "./src/worker.ts",
   "compatibility_date": "2026-06-01",
   "preview_urls": true,
+  "vars": {
+    "CONTACT_RECIPIENT": "cj.ofs@hulu.casa"
+  },
   "send_email": [
     {
       "name": "CONTACT_EMAIL",
