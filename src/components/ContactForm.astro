@@ -3,97 +3,89 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
 ---
 
 <form class="contact-form" action="/api/contact" method="post" novalidate>
-  <div class="contact-form__name-row">
-    <div class="contact-form__field">
-      <label for="contact-first-name">First Name</label>
-      <input
-        id="contact-first-name"
-        name="first-name"
-        type="text"
-        maxlength="100"
-        autocomplete="given-name"
-      />
-    </div>
-
-    <div class="contact-form__field">
-      <label for="contact-last-name">Last Name</label>
-      <input
-        id="contact-last-name"
-        name="last-name"
-        type="text"
-        maxlength="100"
-        autocomplete="family-name"
-      />
-    </div>
-  </div>
-
-  <div class="contact-form__field">
-    <label for="contact-email">Email <span aria-hidden="true">*</span></label>
-    <input
-      id="contact-email"
-      name="email"
-      type="email"
-      maxlength="250"
-      autocomplete="email"
-      required
-    />
-  </div>
-
-  <div class="contact-form__field">
-    <label for="contact-message">Message</label>
-    <textarea
-      id="contact-message"
-      name="message"
-      maxlength="5000"
-      rows="5"
-    ></textarea>
-  </div>
-
-  <div class="contact-form__honeypot" aria-hidden="true">
-    <label for="contact-website">Website</label>
-    <input
-      id="contact-website"
-      name="website"
-      type="text"
-      tabindex="-1"
-      autocomplete="off"
-    />
-  </div>
-
-  <div
-    class="cf-turnstile"
-    data-sitekey={turnstileSiteKey}
-    data-theme="light"
-  ></div>
-
-  <div class="contact-form__actions">
-    <button class="contact-form__submit" type="submit">
-      <span class="contact-form__submit-label">Send message</span>
-      <span class="contact-form__submit-pending" aria-hidden="true">
-        <span class="contact-form__spinner"></span>
-        Sending…
-      </span>
-    </button>
-
-    <div class="contact-form__success" hidden>
-      <svg
-        aria-hidden="true"
-        class="contact-form__success-icon"
-        fill="none"
-        viewBox="0 0 24 24"
-      >
-        <path d="m5 12 4.25 4.25L19 6.5" />
-      </svg>
-      <div>
-        <p class="contact-form__success-title">Message sent.</p>
-        <p class="contact-form__success-copy">We’ll be in touch soon.</p>
+  <div class="contact-form__content">
+    <div class="contact-form__name-row">
+      <div class="contact-form__field">
+        <label for="contact-first-name">First Name</label>
+        <input
+          id="contact-first-name"
+          name="first-name"
+          type="text"
+          maxlength="100"
+          autocomplete="given-name"
+        />
       </div>
-      <button class="contact-form__reset" type="button">Send another message</button>
+
+      <div class="contact-form__field">
+        <label for="contact-last-name">Last Name</label>
+        <input
+          id="contact-last-name"
+          name="last-name"
+          type="text"
+          maxlength="100"
+          autocomplete="family-name"
+        />
+      </div>
     </div>
+
+    <div class="contact-form__field">
+      <label for="contact-email">Email <span aria-hidden="true">*</span></label>
+      <input
+        id="contact-email"
+        name="email"
+        type="email"
+        maxlength="250"
+        autocomplete="email"
+        required
+      />
+    </div>
+
+    <div class="contact-form__field">
+      <label for="contact-message">Message</label>
+      <textarea
+        id="contact-message"
+        name="message"
+        maxlength="5000"
+        rows="5"
+      ></textarea>
+    </div>
+
+    <div class="contact-form__honeypot" aria-hidden="true">
+      <label for="contact-website">Website</label>
+      <input
+        id="contact-website"
+        name="website"
+        type="text"
+        tabindex="-1"
+        autocomplete="off"
+      />
+    </div>
+
+    <div
+      class="cf-turnstile"
+      data-sitekey={turnstileSiteKey}
+      data-theme="light"
+    ></div>
+
+    <div class="contact-form__actions">
+      <button class="contact-form__submit" type="submit">
+        <span class="contact-form__submit-label">Send message</span>
+        <span class="contact-form__submit-pending" aria-hidden="true">
+          <span class="contact-form__spinner"></span>
+          Sending…
+        </span>
+      </button>
+    </div>
+
+    <p class="contact-form__error" hidden role="alert"></p>
+  </div>
+
+  <div class="contact-form__success" hidden tabindex="-1">
+    <p class="contact-form__success-copy">We’ll be in touch soon.</p>
+    <button class="contact-form__reset" type="button">Send another message</button>
   </div>
 
   <p class="contact-form__status visually-hidden" aria-live="polite" role="status"></p>
-  <p class="contact-form__error" hidden role="alert"></p>
 </form>
 
 <script
@@ -111,6 +103,9 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
   if (form) {
     const submitButton = form.querySelector<HTMLButtonElement>(
       ".contact-form__submit"
+    );
+    const formContent = form.querySelector<HTMLDivElement>(
+      ".contact-form__content"
     );
     const status = form.querySelector<HTMLParagraphElement>(
       ".contact-form__status"
@@ -196,10 +191,11 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
 
         form.reset();
         resetTurnstile();
-        submitButton?.setAttribute("hidden", "");
+        formContent?.setAttribute("hidden", "");
         success?.removeAttribute("hidden");
+        success?.focus();
         form.dataset.state = "success";
-        setStatus("Message sent. We’ll be in touch soon.");
+        setStatus("We’ll be in touch soon.");
       } catch (error) {
         const message =
           error instanceof Error && error.name === "Error"
@@ -218,7 +214,9 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
 
     resetButton?.addEventListener("click", () => {
       success?.setAttribute("hidden", "");
-      submitButton?.removeAttribute("hidden");
+      formContent?.removeAttribute("hidden");
+      form.reset();
+      resetTurnstile();
       setSubmitting(false);
       setStatus("");
       clearError();
