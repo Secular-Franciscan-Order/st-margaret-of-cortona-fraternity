@@ -52,6 +52,12 @@ Use trunk-based development:
 - Open a PR for changes into `main`.
 - Keep PRs small enough to merge quickly after CI passes.
 
+### Credential checks
+
+When checking existing GitHub or Cloudflare CLI authentication, run the check
+outside the filesystem sandbox (`require_escalated`). Sandboxed credential paths
+can be read-only or unavailable and may produce false authentication failures.
+
 ## Secrets
 
 Never commit secrets, `.env` files, `.dev.vars`, Cloudflare tokens, or private
