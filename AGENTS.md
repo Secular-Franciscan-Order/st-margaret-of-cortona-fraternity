@@ -11,13 +11,15 @@ community. The production target is Cloudflare Workers Static Assets at
 - `pnpm dev`: run the local Astro development server.
 - `pnpm check`: run Astro type and content checks.
 - `pnpm build`: run `astro check` and create the static `dist/` build.
+- `pnpm test:worker`: run Worker request-handling tests.
 - `pnpm test:e2e`: run Playwright smoke tests against the preview server.
 - `pnpm preview`: preview the built site locally.
 - `pnpm deploy`: deploy with Wrangler.
 
 Run `pnpm check` and `pnpm build` before considering infrastructure or site
-changes complete. Run `pnpm test:e2e` when page routes, preview behavior, or
-deployment-facing static behavior changes.
+changes complete. Run `pnpm test:worker` when changing Worker request handling.
+Run `pnpm test:e2e` when page routes, preview behavior, or deployment-facing
+static behavior changes.
 
 ## Toolchain
 
@@ -51,6 +53,12 @@ Use trunk-based development:
 - Use short-lived branches: `feat/*`, `fix/*`, `chore/*`, `docs/*`.
 - Open a PR for changes into `main`.
 - Keep PRs small enough to merge quickly after CI passes.
+
+### Credential checks
+
+When checking existing GitHub or Cloudflare CLI authentication, run the check
+outside the filesystem sandbox (`require_escalated`). Sandboxed credential paths
+can be read-only or unavailable and may produce false authentication failures.
 
 ## Secrets
 

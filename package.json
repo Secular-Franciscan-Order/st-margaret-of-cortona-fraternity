@@ -14,6 +14,7 @@
     "build": "pnpm check:uploads && astro check && astro build",
     "preview": "astro preview",
     "deploy": "wrangler deploy",
+    "test:worker": "node --experimental-strip-types tests/worker.spec.ts",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

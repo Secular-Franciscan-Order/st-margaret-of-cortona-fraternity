@@ -1,5 +1,6 @@
 ---
 import MarkdownPage from "@/components/MarkdownPage.astro";
+import ContactForm from "@/components/ContactForm.astro";
 import { getPages } from "@/lib/content";
 import { siteData } from "@/lib/site-data";
 import SiteLayout from "@/layouts/SiteLayout.astro";
@@ -37,6 +38,7 @@ const showContactInfo = page.data.route === "/get-involved";
             {siteData.contact.email}
           </a>
         </address>
+        <ContactForm />
       </section>
     ) : null
   }

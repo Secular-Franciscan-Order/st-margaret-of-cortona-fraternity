@@ -68,7 +68,7 @@ test("serves each fixed content route", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("renders static contact information without a dead form", async ({ page }) => {
+test("renders a contact form with static contact information", async ({ page }) => {
   await page.goto("/get-involved");
 
   const contact = page.locator(".contact-info");
@@ -84,9 +84,15 @@ test("renders static contact information without a dead form", async ({ page }) 
   await expect(
     contact.getByRole("link", { name: "cmalloy925@gmail.com" })
   ).toBeVisible();
-  await expect(page.locator('input[name="first-name"]')).toHaveCount(0);
-  await expect(page.locator("textarea")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
+  await expect(page.getByLabel("First Name")).toBeVisible();
+  await expect(page.getByLabel("Last Name")).toBeVisible();
+  await expect(page.getByLabel(/Email/)).toHaveAttribute("required", "");
+  await expect(page.getByLabel("Message")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+  await expect(page.locator(".cf-turnstile")).toHaveAttribute(
+    "data-sitekey",
+    "0x4AAAAAAEERQmwQp-jP4ygz"
+  );
 });
 
 test("renders the approved location map on Who We Are", async ({ page }) => {

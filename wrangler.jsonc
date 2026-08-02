@@ -1,10 +1,21 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "franciscan-community-site",
+  "main": "./src/worker.ts",
   "compatibility_date": "2026-06-01",
   "preview_urls": true,
+  "send_email": [
+    {
+      "name": "CONTACT_EMAIL",
+      "destination_address": "cj.ofs@hulu.casa",
+      "allowed_sender_addresses": [
+        "contact@stmargaretofcortona.com"
+      ]
+    }
+  ],
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     "not_found_handling": "404-page",
     "html_handling": "auto-trailing-slash"
   },
