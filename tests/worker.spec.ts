@@ -13,6 +13,7 @@ const env = {
   CONTACT_EMAIL: {
     send: async () => undefined
   },
+  CONTACT_RECIPIENT: "cj.ofs@hulu.casa",
   TURNSTILE_SECRET_KEY: "not-used"
 };
 
@@ -51,4 +52,45 @@ test("rejects an oversized request with an understated Content-Length", async ()
 
   assert.equal(response.status, 413);
   await assert.doesNotReject(response.json());
+});
+
+test("sends a verified submission to the configured recipient", async () => {
+  const originalFetch = globalThis.fetch;
+  const sentMessages: Array<{ to: string | { email: string; name?: string } }> = [];
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({ success: true, hostname: "stmargaretofcortona.endian.dev" }),
+      { headers: { "Content-Type": "application/json" } }
+    );
+
+  try {
+    const response = await worker.fetch(
+      new Request(`${origin}/api/contact`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: origin
+        },
+        body: new URLSearchParams({
+          email: "visitor@example.com",
+          message: "Hello",
+          "cf-turnstile-response": "test-token"
+        })
+      }),
+      {
+        ...env,
+        CONTACT_EMAIL: {
+          send: async (message) => {
+            sentMessages.push({ to: message.to });
+          }
+        }
+      }
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(sentMessages, [{ to: env.CONTACT_RECIPIENT }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

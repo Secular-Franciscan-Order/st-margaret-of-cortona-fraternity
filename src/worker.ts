@@ -9,7 +9,7 @@ interface EmailAddress {
 
 interface ContactEmail {
   send(message: {
-    to?: string | EmailAddress;
+    to: string | EmailAddress;
     from: string | EmailAddress;
     subject: string;
     text: string;
@@ -21,6 +21,7 @@ interface ContactEmail {
 interface Env {
   ASSETS: AssetFetcher;
   CONTACT_EMAIL: ContactEmail;
+  CONTACT_RECIPIENT: string;
   TURNSTILE_SECRET_KEY: string;
 }
 
@@ -215,6 +216,7 @@ const handleContactRequest = async (request: Request, env: Env) => {
 
   try {
     await env.CONTACT_EMAIL.send({
+      to: env.CONTACT_RECIPIENT,
       from: {
         email: "contact@stmargaretofcortona.com",
         name: "St. Margaret of Cortona Fraternity"
