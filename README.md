@@ -3,7 +3,7 @@
 A mostly static Astro website for the St. Margaret of Cortona Fraternity,
 deployed with Cloudflare Workers Static Assets.
 
-Production URL: <https://stmargaretofcortona.endian.dev>
+Production URL: <https://www.stmargaretofcortona.com>
 
 ## Project Overview
 

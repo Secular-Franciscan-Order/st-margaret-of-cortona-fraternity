@@ -52,7 +52,7 @@ Enable the features available for this repository:
 Configure Cloudflare Workers Builds as the single production deploy path:
 
 - Production branch: `main`
-- Production URL: `https://stmargaretofcortona.endian.dev`
+- Production URL: `https://www.stmargaretofcortona.com`
 - Root directory: `/`
 - Build command: `pnpm build`
 - Deploy command: `pnpm deploy`
