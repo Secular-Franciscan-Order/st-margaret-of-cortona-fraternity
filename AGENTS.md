@@ -4,7 +4,7 @@
 
 This repository contains a mostly static Astro website for the Franciscan
 community. The production target is Cloudflare Workers Static Assets at
-`https://stmargaretofcortona.endian.dev`.
+`https://www.stmargaretofcortona.com`.
 
 ## Commands
 
