@@ -21,7 +21,7 @@
     "test:worker": "node --experimental-strip-types tests/worker.spec.ts",
     "test:e2e": "playwright test",
     "test:built-site": "node --test tests/built-site.spec.mjs",
-    "test:cms": "node --test tests/cms-content.spec.mjs tests/cms-changes.spec.mjs tests/cms-review.spec.mjs"
+    "test:cms": "node --experimental-strip-types --test tests/cms-content.spec.mjs tests/cms-changes.spec.mjs tests/cms-expectations.spec.ts tests/cms-review.spec.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.9",
