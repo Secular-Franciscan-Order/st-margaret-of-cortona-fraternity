@@ -613,6 +613,316 @@ function isMarkdownBlockPrefix(prefix) {
   );
 }
 
+const javascriptIdentifierPattern =
+  /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*/u;
+
+function readJavascriptIdentifier(source, start) {
+  const value = javascriptIdentifierPattern.exec(source.slice(start))?.[0];
+  return value ? { value, end: start + value.length } : null;
+}
+
+function skipJavascriptTrivia(source, start) {
+  let index = start;
+  let sawLineEnding = false;
+  while (index < source.length) {
+    if (/\s/u.test(source[index])) {
+      if (source[index] === "\n" || source[index] === "\r") {
+        sawLineEnding = true;
+      }
+      index += 1;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      const end = source.indexOf("*/", index + 2);
+      if (end < 0) return { index: source.length, sawLineEnding, complete: false };
+      if (/[\r\n]/u.test(source.slice(index, end + 2))) sawLineEnding = true;
+      index = end + 2;
+      continue;
+    }
+    if (source.startsWith("//", index)) {
+      const end = source.indexOf("\n", index + 2);
+      if (end < 0) return { index: source.length, sawLineEnding, complete: true };
+      sawLineEnding = true;
+      index = end + 1;
+      continue;
+    }
+    break;
+  }
+  return { index, sawLineEnding, complete: true };
+}
+
+function javascriptStringEnd(source, start, allowLineEndings = false) {
+  const quote = source[start];
+  if (!["\"", "'", "`"].includes(quote)) return null;
+  for (let index = start + 1; index < source.length; index += 1) {
+    if (source[index] === "\\") {
+      index += 1;
+      continue;
+    }
+    if (!allowLineEndings && /[\r\n]/u.test(source[index])) return null;
+    if (source[index] === quote) return index + 1;
+  }
+  return null;
+}
+
+function balancedJavascriptEnd(source, start, open, close) {
+  if (source[start] !== open) return null;
+  let depth = 1;
+  for (let index = start + 1; index < source.length; ) {
+    if (["\"", "'", "`"].includes(source[index])) {
+      const end = javascriptStringEnd(source, index, source[index] === "`");
+      if (end === null) return null;
+      index = end;
+      continue;
+    }
+    if (source.startsWith("/*", index) || source.startsWith("//", index)) {
+      const trivia = skipJavascriptTrivia(source, index);
+      if (!trivia.complete) return null;
+      index = trivia.index;
+      continue;
+    }
+    if (source[index] === open) depth += 1;
+    if (source[index] === close) {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+    index += 1;
+  }
+  return null;
+}
+
+function moduleSpecifierTailIsComplete(source, start) {
+  let trivia = skipJavascriptTrivia(source, start);
+  if (!trivia.complete) return false;
+  if (
+    trivia.index >= source.length ||
+    trivia.sawLineEnding ||
+    source[trivia.index] === ";"
+  ) {
+    return true;
+  }
+
+  const attribute = readJavascriptIdentifier(source, trivia.index);
+  if (!attribute || !["assert", "with"].includes(attribute.value)) return false;
+  trivia = skipJavascriptTrivia(source, attribute.end);
+  const end = balancedJavascriptEnd(source, trivia.index, "{", "}");
+  return end !== null && moduleSpecifierTailIsComplete(source, end);
+}
+
+function moduleSpecifierEnd(source, start) {
+  const trivia = skipJavascriptTrivia(source, start);
+  if (!trivia.complete) return null;
+  const end = javascriptStringEnd(source, trivia.index);
+  return end !== null && moduleSpecifierTailIsComplete(source, end) ? end : null;
+}
+
+function namespaceImportEnd(source, start) {
+  if (source[start] !== "*") return null;
+  let trivia = skipJavascriptTrivia(source, start + 1);
+  const asKeyword = readJavascriptIdentifier(source, trivia.index);
+  if (!asKeyword || asKeyword.value !== "as") return null;
+  trivia = skipJavascriptTrivia(source, asKeyword.end);
+  return readJavascriptIdentifier(source, trivia.index)?.end ?? null;
+}
+
+function staticImportAt(source, offset) {
+  let trivia = skipJavascriptTrivia(source, offset + "import".length);
+  if (!trivia.complete) return false;
+  if (["\"", "'"].includes(source[trivia.index])) {
+    const end = javascriptStringEnd(source, trivia.index);
+    return end !== null && moduleSpecifierTailIsComplete(source, end);
+  }
+
+  let clauseEnd;
+  if (source[trivia.index] === "{") {
+    clauseEnd = balancedJavascriptEnd(source, trivia.index, "{", "}");
+  } else if (source[trivia.index] === "*") {
+    clauseEnd = namespaceImportEnd(source, trivia.index);
+  } else {
+    const defaultBinding = readJavascriptIdentifier(source, trivia.index);
+    if (!defaultBinding) return false;
+    trivia = skipJavascriptTrivia(source, defaultBinding.end);
+    clauseEnd = defaultBinding.end;
+    if (source[trivia.index] === ",") {
+      trivia = skipJavascriptTrivia(source, trivia.index + 1);
+      clauseEnd =
+        source[trivia.index] === "{"
+          ? balancedJavascriptEnd(source, trivia.index, "{", "}")
+          : namespaceImportEnd(source, trivia.index);
+    }
+  }
+  if (clauseEnd === null || clauseEnd === undefined) return false;
+
+  trivia = skipJavascriptTrivia(source, clauseEnd);
+  const fromKeyword = readJavascriptIdentifier(source, trivia.index);
+  if (!fromKeyword || fromKeyword.value !== "from") return false;
+  return moduleSpecifierEnd(source, fromKeyword.end) !== null;
+}
+
+function variableExportAt(source, start, declaration) {
+  let trivia = skipJavascriptTrivia(source, start);
+  let bindingEnd;
+  if (source[trivia.index] === "{" || source[trivia.index] === "[") {
+    const open = source[trivia.index];
+    bindingEnd = balancedJavascriptEnd(
+      source,
+      trivia.index,
+      open,
+      open === "{" ? "}" : "]"
+    );
+  } else {
+    bindingEnd = readJavascriptIdentifier(source, trivia.index)?.end ?? null;
+  }
+  if (bindingEnd === null) return false;
+
+  trivia = skipJavascriptTrivia(source, bindingEnd);
+  if (source[trivia.index] === "=") {
+    const value = skipJavascriptTrivia(source, trivia.index + 1);
+    return value.complete && value.index < source.length;
+  }
+  return (
+    declaration !== "const" &&
+    (trivia.index >= source.length ||
+      trivia.sawLineEnding ||
+      [",", ";"].includes(source[trivia.index]))
+  );
+}
+
+function functionExportAt(source, start, allowAnonymous) {
+  let trivia = skipJavascriptTrivia(source, start);
+  if (source[trivia.index] === "*") {
+    trivia = skipJavascriptTrivia(source, trivia.index + 1);
+  }
+  const name = readJavascriptIdentifier(source, trivia.index);
+  if (name) trivia = skipJavascriptTrivia(source, name.end);
+  if (!name && !allowAnonymous) return false;
+  const parametersEnd = balancedJavascriptEnd(source, trivia.index, "(", ")");
+  if (parametersEnd === null) return false;
+  trivia = skipJavascriptTrivia(source, parametersEnd);
+  return balancedJavascriptEnd(source, trivia.index, "{", "}") !== null;
+}
+
+function classExportAt(source, start, allowAnonymous) {
+  let trivia = skipJavascriptTrivia(source, start);
+  const name = readJavascriptIdentifier(source, trivia.index);
+  if (name) trivia = skipJavascriptTrivia(source, name.end);
+  if (!name && !allowAnonymous) return false;
+
+  for (let index = trivia.index; index < source.length; index += 1) {
+    if (source.startsWith("/*", index) || source.startsWith("//", index)) {
+      const comment = skipJavascriptTrivia(source, index);
+      if (!comment.complete) return false;
+      index = comment.index - 1;
+      continue;
+    }
+    if (["\"", "'", "`"].includes(source[index])) {
+      const end = javascriptStringEnd(source, index, source[index] === "`");
+      if (end === null) return false;
+      index = end - 1;
+      continue;
+    }
+    if (source[index] === ";") return false;
+    if (source[index] === "{") {
+      return balancedJavascriptEnd(source, index, "{", "}") !== null;
+    }
+  }
+  return false;
+}
+
+function staticExportAt(source, offset) {
+  let trivia = skipJavascriptTrivia(source, offset + "export".length);
+  if (!trivia.complete) return false;
+
+  if (source[trivia.index] === "{") {
+    const end = balancedJavascriptEnd(source, trivia.index, "{", "}");
+    if (end === null) return false;
+    trivia = skipJavascriptTrivia(source, end);
+    const fromKeyword = readJavascriptIdentifier(source, trivia.index);
+    if (fromKeyword?.value === "from") {
+      return moduleSpecifierEnd(source, fromKeyword.end) !== null;
+    }
+    return (
+      trivia.index >= source.length ||
+      trivia.sawLineEnding ||
+      source[trivia.index] === ";"
+    );
+  }
+
+  if (source[trivia.index] === "*") {
+    trivia = skipJavascriptTrivia(source, trivia.index + 1);
+    const asKeyword = readJavascriptIdentifier(source, trivia.index);
+    if (asKeyword?.value === "as") {
+      trivia = skipJavascriptTrivia(source, asKeyword.end);
+      const name = readJavascriptIdentifier(source, trivia.index);
+      if (!name) return false;
+      trivia = skipJavascriptTrivia(source, name.end);
+    }
+    const fromKeyword = readJavascriptIdentifier(source, trivia.index);
+    return (
+      fromKeyword?.value === "from" &&
+      moduleSpecifierEnd(source, fromKeyword.end) !== null
+    );
+  }
+
+  const declaration = readJavascriptIdentifier(source, trivia.index);
+  if (!declaration) return false;
+  trivia = skipJavascriptTrivia(source, declaration.end);
+  if (["const", "let", "var"].includes(declaration.value)) {
+    return variableExportAt(source, declaration.end, declaration.value);
+  }
+  if (declaration.value === "function") {
+    return functionExportAt(source, declaration.end, false);
+  }
+  if (declaration.value === "class") {
+    return classExportAt(source, declaration.end, false);
+  }
+  if (declaration.value === "async") {
+    const functionKeyword = readJavascriptIdentifier(source, trivia.index);
+    return (
+      functionKeyword?.value === "function" &&
+      functionExportAt(source, functionKeyword.end, false)
+    );
+  }
+  if (declaration.value !== "default") return false;
+  if (trivia.index >= source.length || source[trivia.index] === ";") return false;
+  const defaultKind = readJavascriptIdentifier(source, trivia.index);
+  if (defaultKind?.value === "function") {
+    return functionExportAt(source, defaultKind.end, true);
+  }
+  if (defaultKind?.value === "class") {
+    return classExportAt(source, defaultKind.end, true);
+  }
+  return true;
+}
+
+function jsxTagTerminator(source, start) {
+  let braceDepth = 0;
+  let quote = "";
+  for (let index = start; index < source.length; index += 1) {
+    if (quote) {
+      if (source[index] === quote && !isEscaped(source, index)) quote = "";
+      continue;
+    }
+    if (["\"", "'", "`"].includes(source[index])) {
+      quote = source[index];
+      continue;
+    }
+    if (
+      braceDepth > 0 &&
+      (source.startsWith("/*", index) || source.startsWith("//", index))
+    ) {
+      const comment = skipJavascriptTrivia(source, index);
+      if (!comment.complete) return -1;
+      index = comment.index - 1;
+      continue;
+    }
+    if (source[index] === "{") braceDepth += 1;
+    else if (source[index] === "}" && braceDepth > 0) braceDepth -= 1;
+    else if (source[index] === ">" && braceDepth === 0) return index;
+  }
+  return -1;
+}
+
 function sourceLineAtOffset(source, offset, bodyStartLine) {
   let line = bodyStartLine;
   for (let index = 0; index < offset; index += 1) {
@@ -714,9 +1024,15 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     }
   }
 
-  const esmPattern = /(^|\n)[ \t]{0,3}(import|export)(?=$|[^A-Za-z0-9_$-])/g;
+  const esmPattern =
+    /(^|\n)[ \t]{0,3}(import|export)(?![$_\u200C\u200D\p{ID_Continue}-])/gu;
   while ((match = esmPattern.exec(source))) {
     const offset = match.index + match[0].lastIndexOf(match[2]);
+    const isStaticStatement =
+      match[2] === "import"
+        ? staticImportAt(source, offset)
+        : staticExportAt(source, offset);
+    if (!isStaticStatement) continue;
     addExcludedSyntaxIssue(
       problems,
       file,
@@ -784,9 +1100,10 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     const name = jsxNamePattern.exec(remainder)?.[0];
     if (!name) continue;
     const boundary = remainder[name.length];
-    const componentLike =
-      !/^[a-z]/.test(name) || name.includes(".") || name.includes(":");
-    if (componentLike && (boundary === undefined || /[\s/>]/u.test(boundary))) {
+    if (!/[\s/>]/u.test(boundary || "")) continue;
+    if (source.indexOf(">", nameStart + name.length) < 0) break;
+    const tagEnd = jsxTagTerminator(source, nameStart + name.length);
+    if (tagEnd >= 0) {
       addExcludedSyntaxIssue(
         problems,
         file,
@@ -797,6 +1114,7 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
         "JSX/Astro component syntax is not allowed.",
         "Remove the component markup or put a non-executed example in code."
       );
+      offset = tagEnd;
     }
   }
 }
