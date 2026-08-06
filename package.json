@@ -9,20 +9,25 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "check": "astro check",
+    "check": "pnpm check:cms && astro check",
+    "check:cms": "node scripts/check-cms-content.mjs",
+    "check:cms-changes": "node scripts/check-cms-changes.mjs",
     "check:uploads": "node scripts/check-uploads.mjs",
-    "build": "pnpm check:uploads && astro check && astro build",
+    "build": "pnpm check:uploads && pnpm check:cms && astro check && astro build",
     "preview": "astro preview",
     "deploy": "wrangler deploy",
     "test:worker": "node --experimental-strip-types tests/worker.spec.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:cms": "node --test tests/cms-content.spec.mjs tests/cms-changes.spec.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.9",
     "@playwright/test": "1.60.0",
     "@types/node": "25.9.1",
     "astro": "6.4.2",
+    "mdast-util-from-markdown": "2.0.3",
     "typescript": "6.0.3",
-    "wrangler": "4.95.0"
+    "wrangler": "4.95.0",
+    "yaml": "2.9.0"
   }
 }

@@ -1,0 +1,135 @@
+name: CMS draft PR
+
+on:
+  push:
+    branches:
+      - "cms/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: cms-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  draft-pr:
+    name: Open or reuse CMS draft PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact CMS head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Verify safe event inputs and exact head
+        env:
+          CMS_BRANCH: ${{ github.ref_name }}
+          CMS_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$CMS_HEAD_SHA"
+          test "$(git rev-parse --verify "$CMS_HEAD_SHA^{commit}")" = "$CMS_HEAD_SHA"
+          git check-ref-format --branch "$CMS_BRANCH"
+          case "$CMS_BRANCH" in
+            cms/*) ;;
+            *) echo "Refusing non-CMS branch: $CMS_BRANCH" >&2; exit 1 ;;
+          esac
+
+      - name: Fetch current main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Check CMS changed paths before PR creation
+        env:
+          CMS_HEAD_SHA: ${{ github.sha }}
+        run: node scripts/check-cms-changes.mjs --base-ref origin/main --head "$CMS_HEAD_SHA"
+
+      - name: Open one idempotent draft PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CMS_BRANCH: ${{ github.ref_name }}
+          CMS_HEAD_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+          CMS_PR_BODY: |
+            ## Pages CMS draft review
+
+            This draft was opened automatically for an activated `cms/**` content branch. It must remain unmerged until every gate below is complete.
+
+            - Wait for branch CI, including the CMS path/content/config guards and the regular check/build/test suite.
+            - Approve the initial Actions run manually when GitHub requires it.
+            - Wait for the Cloudflare Workers Builds preview; Cloudflare remains the only preview and production integration.
+            - Inspect the complete diff and preview. The changed-path guard prevents ordinary scope drift but is not a hostile-code trust boundary; human diff review is mandatory.
+            - When the intended content is complete, mark the PR ready for review and resolve every conversation.
+            - Update the branch from current `main`, rerun fresh checks, and re-inspect the resulting diff and preview.
+            - Obtain one eligible approval. An owner-authored PR cannot be self-approved; a bot-authored PR can normally be admin-approved.
+            - A human performs the merge only after every check, preview, freshness, conversation, approval, and review gate passes.
+
+            A PR-only admin bypass is an explicit, commented, audited exception after checks, diff, and preview review. It is never permission to push directly to `main`.
+        run: |
+          set -eu
+
+          list_prs() {
+            gh pr list \
+              --repo "$GH_REPO" \
+              --state open \
+              --base main \
+              --head "$CMS_BRANCH" \
+              --json number,isDraft,headRefOid,baseRefName
+          }
+
+          verify_one_pr() {
+            pr_json="$1"
+            pr_count="$(printf '%s' "$pr_json" | jq 'length')"
+            test "$pr_count" -eq 1
+            test "$(printf '%s' "$pr_json" | jq -r '.[0].baseRefName')" = "main"
+            test "$(printf '%s' "$pr_json" | jq -r '.[0].headRefOid')" = "$CMS_HEAD_SHA"
+          }
+
+          existing="$(list_prs)"
+          count="$(printf '%s' "$existing" | jq 'length')"
+          if test "$count" -gt 1; then
+            echo "More than one open PR targets main from $CMS_BRANCH; refusing to choose." >&2
+            exit 1
+          fi
+          if test "$count" -eq 1; then
+            verify_one_pr "$existing"
+            printf 'Reusing PR #%s.\n' "$(printf '%s' "$existing" | jq -r '.[0].number')"
+            exit 0
+          fi
+
+          set +e
+          create_output="$(gh pr create \
+            --repo "$GH_REPO" \
+            --base main \
+            --head "$CMS_BRANCH" \
+            --draft \
+            --title "content: review ${CMS_BRANCH#cms/}" \
+            --body "$CMS_PR_BODY" 2>&1)"
+          create_status=$?
+          set -e
+
+          created="$(list_prs)"
+          if ! verify_one_pr "$created"; then
+            printf '%s\n' "$create_output" >&2
+            if test "$create_status" -ne 0; then
+              echo "PR creation failed and no exact idempotent PR was found." >&2
+            else
+              echo "PR creation returned without exactly one matching head/base PR." >&2
+            fi
+            exit 1
+          fi
+
+          if test "$create_status" -ne 0; then
+            echo "A concurrent run created the exact PR; reusing it."
+          else
+            test "$(printf '%s' "$created" | jq -r '.[0].isDraft')" = "true"
+            printf '%s\n' "$create_output"
+          fi

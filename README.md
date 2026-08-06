@@ -43,10 +43,13 @@ pnpm install
 ```sh
 pnpm dev
 pnpm check
+pnpm check:cms
+pnpm check:cms-changes -- --base-ref origin/main --head HEAD
 pnpm check:uploads
 pnpm build
 pnpm test:worker
 pnpm test:e2e
+pnpm test:cms
 pnpm preview
 pnpm deploy
 ```
@@ -54,11 +57,16 @@ pnpm deploy
 Important command behavior:
 
 - `pnpm dev` runs the local Astro development server.
-- `pnpm check` runs Astro type and content checks.
+- `pnpm check` runs the CMS content/configuration guard and Astro checks.
+- `pnpm check:cms` scans the real Pages CMS configuration and editable content.
+- `pnpm check:cms-changes` compares an exact head with current `main` and
+  rejects changes outside the activated CMS ownership boundary.
 - `pnpm check:uploads` enforces local media upload limits.
-- `pnpm build` runs upload checks, Astro checks, and the static build.
+- `pnpm build` runs upload and CMS guards, Astro checks, and the static build.
 - `pnpm test:worker` runs Worker request-handling tests.
 - `pnpm test:e2e` runs Playwright smoke tests against `pnpm preview`.
+- `pnpm test:cms` runs the unsafe-content, configuration, and changed-path
+  fixture suites.
 - `pnpm deploy` deploys the built site with Wrangler.
 
 Build the site before running Playwright locally:
@@ -120,6 +128,44 @@ Pages CMS must never commit directly to `main`. After activation, `cms/*` is
 reserved for Pages CMS draft-PR branches and all CMS changes require the
 documented checks, preview, eligible approval, full-diff review, and human
 merge.
+
+### Conditional Pages CMS workflow
+
+Use this procedure only while the latest valid authorized state-transition
+comment on tracking issue #46 says `Activation complete`:
+
+1. Confirm that activation record is current and valid. Otherwise stop; Pages
+   CMS is frozen.
+2. In Pages CMS, select the current `main` branch first, then create a new
+   `cms/<topic>` branch. Pages CMS branches from the selected branch, so verify
+   this order and the starting SHA.
+3. Make only the intended edits within the audited surfaces in
+   `docs/content-ownership.md`.
+4. Wait for branch CI and exactly one automated draft PR. Do not create a
+   second PR for the branch.
+5. Manually approve the initial GitHub Actions run when GitHub requires that
+   approval.
+6. Inspect the complete diff and Cloudflare preview, and require all configured
+   checks to be green. Cloudflare Workers Builds remains the only preview and
+   production integration.
+7. Mark the PR ready, resolve every conversation, update the branch from
+   current `main`, rerun fresh checks, and re-inspect the updated diff and
+   preview.
+8. Obtain one eligible approval. Bot-authored CMS PRs can normally be approved
+   by an administrator; an owner-authored PR cannot be self-approved.
+9. A human merges only after all checks, preview, freshness, conversation,
+   approval, and full-diff gates pass.
+
+The path gate prevents ordinary or accidental CMS scope drift, but branch code
+supplies its workflow and checker. It is not a hostile-code trust boundary;
+human review of the full diff is mandatory. A PR-only administrator bypass is
+an explicit, commented, audited exception after checks, diff, and preview
+review. It is never permission to push directly to `main`.
+
+The draft-PR workflow needs the repository setting **Allow GitHub Actions to
+create and approve pull requests**. Its first run can require manual workflow
+approval. Apply or test that setting and the required `main` rules only under a
+separately authorized rollout; see `docs/repo-settings.md`.
 
 ## Media Upload Rules
 
