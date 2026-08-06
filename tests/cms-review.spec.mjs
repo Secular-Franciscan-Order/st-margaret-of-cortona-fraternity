@@ -42,7 +42,7 @@ const completePagesCmsPayload = {
     cancelable: true
   },
   repository: {
-    owner: "Secular-Franciscan-Order",
+    owner: "secular-franciscan-order",
     repo: "st-margaret-of-cortona-fraternity",
     ref: "cms/update-faq",
     workflowRef: "main",
@@ -270,7 +270,7 @@ function callsFor(state, tool, ...prefix) {
   );
 }
 
-test("reduces the complete tagged Pages CMS 2.1.8 payload to its branch", () => {
+test("accepts the real Pages CMS 2.1.8 lowercase-owner payload", () => {
   assert.deepEqual(Object.keys(completePagesCmsPayload), [
     "source",
     "action",
@@ -281,6 +281,19 @@ test("reduces the complete tagged Pages CMS 2.1.8 payload to its branch", () => 
     "inputs"
   ]);
   assert.deepEqual(parseCmsReviewPayload(payload(), trusted), {
+    branch: "cms/update-faq"
+  });
+});
+
+test("matches GitHub owner and repository names case-insensitively", () => {
+  const source = payload({
+    repository: {
+      ...completePagesCmsPayload.repository,
+      repo: "ST-MARGARET-OF-CORTONA-FRATERNITY"
+    }
+  });
+
+  assert.deepEqual(parseCmsReviewPayload(source, trusted), {
     branch: "cms/update-faq"
   });
 });
