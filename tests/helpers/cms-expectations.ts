@@ -70,7 +70,7 @@ export interface FaqExpectation {
 export interface ResourceExpectation {
   source: string;
   title: string;
-  order: number;
+  sortDate: string;
   linkLabel: string;
   uploadedFile: string;
   externalUrl: string;
@@ -163,6 +163,28 @@ function requireNumber(
 
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new TypeError(`${context}.${property} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function requireIsoDate(
+  record: UnknownRecord,
+  property: string,
+  context: string
+): string {
+  const value = requireString(record, property, context);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new TypeError(`${context}.${property} must use YYYY-MM-DD format.`);
+  }
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== value
+  ) {
+    throw new TypeError(`${context}.${property} must be a valid date.`);
   }
 
   return value;
@@ -473,7 +495,7 @@ function loadResources(root: string): ResourceExpectation[] {
       return {
         source,
         title,
-        order: requireNumber(data, "order", source),
+        sortDate: requireIsoDate(data, "sortDate", source),
         linkLabel,
         uploadedFile,
         externalUrl,
@@ -484,7 +506,10 @@ function loadResources(root: string): ResourceExpectation[] {
       };
     })
     .filter((resource) => resource.published)
-    .sort((a, b) => a.order - b.order);
+    .sort(
+      (a, b) =>
+        b.sortDate.localeCompare(a.sortDate) || a.title.localeCompare(b.title)
+    );
 }
 
 export function loadCmsExpectations(

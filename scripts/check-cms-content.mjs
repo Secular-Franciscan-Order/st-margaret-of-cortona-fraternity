@@ -176,9 +176,10 @@ const EXPECTED_PAGES_CONFIG = {
       operations: { create: false, rename: false, delete: false },
       view: {
         primary: "title",
-        sort: "navOrder",
-        order: "asc",
-        fields: ["route", "navLabel"]
+        fields: ["navOrder", "route", "navLabel"],
+        sort: ["navOrder", "title"],
+        search: ["title", "navLabel", "route"],
+        default: { sort: "navOrder", order: "asc" }
       },
       fields: [
         { name: "title", type: "string", required: true },
@@ -208,13 +209,20 @@ const EXPECTED_PAGES_CONFIG = {
       filename: { template: "{primary}.md", field: "create" },
       view: {
         primary: "question",
-        sort: "order",
-        order: "asc",
-        fields: ["published"]
+        fields: ["order", "published"],
+        sort: ["order", "question"],
+        search: ["question", "body"],
+        default: { sort: "order", order: "asc" }
       },
       fields: [
         { name: "question", type: "string", required: true },
-        { name: "order", type: "number", required: true },
+        {
+          name: "order",
+          type: "number",
+          required: true,
+          default: 1000,
+          options: { min: 0 }
+        },
         { name: "published", type: "boolean" },
         {
           name: "body",
@@ -238,13 +246,19 @@ const EXPECTED_PAGES_CONFIG = {
       filename: { template: "{primary}.md", field: "create" },
       view: {
         primary: "title",
-        sort: "order",
-        order: "asc",
-        fields: ["published", "externalUrl", "uploadedFile"]
+        fields: ["linkLabel", "sortDate", "published"],
+        sort: ["sortDate", "title"],
+        search: ["title", "linkLabel", "body"],
+        default: { sort: "sortDate", order: "desc" }
       },
       fields: [
         { name: "title", type: "string", required: true },
-        { name: "order", type: "number", required: true },
+        {
+          name: "sortDate",
+          type: "date",
+          required: true,
+          options: { format: "yyyy-MM-dd" }
+        },
         { name: "linkLabel", type: "string" },
         {
           name: "uploadedFile",

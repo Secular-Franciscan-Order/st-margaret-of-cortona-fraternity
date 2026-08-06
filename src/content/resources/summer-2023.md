@@ -1,6 +1,6 @@
 ---
 title: Summer 2023
-order: 80
+sortDate: 2023-07-01
 linkLabel: ""
 uploadedFile: ""
 externalUrl: ""
