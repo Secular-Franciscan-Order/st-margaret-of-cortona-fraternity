@@ -66,8 +66,10 @@ the CMS freeze in effect, and stop.
 - Prefer pinned third-party actions or trusted first-party actions.
 - The Pages CMS **Open review PR** action must dispatch `cms-review.yml` at
   `ref: main`. That workflow accepts only the bounded `payload` JSON input,
-  checks out trusted `main`, validates a same-repository `cms/**` branch and
-  exact current head, and never checks out or executes CMS-head code with its
+  requires its workflow SHA to match the exact trusted `main` checkout,
+  validates and fetches the same-repository `cms/**` branch, derives its exact
+  remote head for the trusted path gate, rechecks it before and after the
+  draft-PR operation, and never checks out or executes CMS-head code with its
   pull-request token.
 - Ordinary `cms/**` push and PR CI remains read-only and runs the shared deploy
   verification before Playwright.

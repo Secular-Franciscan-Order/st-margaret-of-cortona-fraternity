@@ -57,7 +57,7 @@ separators, query, fragment, external host, or other extension.
 
 The guard uses `mdast-util-from-markdown@2.0.3` for renderer-facing structure
 and the same `marked@17.0.5` tokenizer version used by Pages CMS 2.1.8 for the
-editor-facing boundary. Each Markdown file is limited to 256 KiB and the
+editor-facing boundary. Each Markdown file is limited to 16 KiB and the
 repository scan reports at most 50 diagnostics. The visual editor's Source
 switch is disabled on every rich-text field; unsupported raw source is not a
 lossless CMS editing surface.
@@ -79,10 +79,12 @@ lossless raw source is ever required, use a separately reviewed Pages CMS
 the visual rich-text field.
 
 The explicit **Open review PR** action dispatches `cms-review.yml` at trusted
-`main`. Its write-capable job parses one bounded JSON payload, verifies the
-same-repository `cms/**` branch and exact head, fetches that commit without
-checking it out, and runs the trusted-main changed-path checker before opening
-or reusing one draft PR. CMS-head code runs only in ordinary read-only CI.
+`main`. Its write-capable job parses one bounded JSON payload, verifies its
+workflow SHA against the exact trusted `main` revision, validates and fetches
+the same-repository `cms/**` branch without checking it out, derives its exact
+head for the trusted changed-path gate, and re-fetches and rechecks that head
+immediately before and after draft-PR creation or reuse. CMS-head code runs only
+in ordinary read-only CI.
 Reviewers must still inspect the complete diff and preview before a human
 merge.
 

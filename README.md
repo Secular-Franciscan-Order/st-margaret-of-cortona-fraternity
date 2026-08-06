@@ -173,10 +173,12 @@ comment on tracking issue #46 says `Activation complete`:
    approval, and full-diff gates pass.
 
 The privileged draft-PR workflow checks out trusted `main`, validates the
-Pages CMS payload as bounded JSON data, fetches the exact CMS commit without
-checking it out, and runs the trusted changed-path gate before using its
-pull-request token. CMS-head workflows and scripts run only in ordinary
-read-only CI. Human review of the full diff remains mandatory. A PR-only
+Pages CMS payload's workflow SHA against that exact revision, fetches the
+selected `cms/**` branch without checking it out, derives its exact head for the
+trusted changed-path gate, and re-fetches and rechecks that head immediately
+before and after draft-PR creation or reuse. CMS-head workflows and scripts run
+only in ordinary read-only CI. Human review of the full diff remains mandatory.
+A PR-only
 administrator bypass is an explicit, commented, audited exception after
 checks, diff, and preview review. Record the GitHub bypass reason; this is never
 permission to push directly to `main`.

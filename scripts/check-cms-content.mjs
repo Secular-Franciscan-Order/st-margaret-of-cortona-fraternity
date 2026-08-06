@@ -29,7 +29,7 @@ const CONTENT_ROOTS = [
 ];
 
 export const CMS_MARKDOWN_LIMITS = Object.freeze({
-  maxBytes: 256 * 1024,
+  maxBytes: 16 * 1024,
   maxDiagnostics: 50
 });
 

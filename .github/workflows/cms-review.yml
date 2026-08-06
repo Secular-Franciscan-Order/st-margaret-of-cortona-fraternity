@@ -50,28 +50,34 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"
           test "$(git rev-parse --verify "$TRUSTED_SHA^{commit}")" = "$TRUSTED_SHA"
 
-      - name: Fetch current main and named CMS head without checkout
+      - name: Fetch current main and resolve named CMS head without checkout
+        id: cms_head
         env:
           CMS_BRANCH: ${{ steps.request.outputs.branch }}
-          CMS_HEAD_SHA: ${{ steps.request.outputs.sha }}
+          TRUSTED_SHA: ${{ github.sha }}
         run: |
           set -eu
           git check-ref-format --branch "$CMS_BRANCH"
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$TRUSTED_SHA"
           git fetch --no-tags origin "+refs/heads/$CMS_BRANCH:refs/remotes/origin/cms-review-head"
-          test "$(git rev-parse refs/remotes/origin/cms-review-head)" = "$CMS_HEAD_SHA"
-          test "$(git rev-parse --verify "$CMS_HEAD_SHA^{commit}")" = "$CMS_HEAD_SHA"
+          cms_head_sha="$(git rev-parse --verify "refs/remotes/origin/cms-review-head^{commit}")"
+          test "${#cms_head_sha}" -eq 40
+          case "$cms_head_sha" in
+            *[!0-9a-f]*) echo "Resolved CMS head is not a full commit SHA." >&2; exit 1 ;;
+          esac
+          printf 'sha=%s\n' "$cms_head_sha" >> "$GITHUB_OUTPUT"
 
       - name: Run trusted-main CMS changed-path gate
         env:
-          CMS_HEAD_SHA: ${{ steps.request.outputs.sha }}
+          CMS_HEAD_SHA: ${{ steps.cms_head.outputs.sha }}
         run: node scripts/check-cms-changes.mjs --base-ref origin/main --head "$CMS_HEAD_SHA"
 
       - name: Open one idempotent draft PR
         env:
           GH_TOKEN: ${{ github.token }}
           CMS_BRANCH: ${{ steps.request.outputs.branch }}
-          CMS_HEAD_SHA: ${{ steps.request.outputs.sha }}
+          CMS_HEAD_SHA: ${{ steps.cms_head.outputs.sha }}
           GH_REPO: ${{ github.repository }}
           GH_REPO_OWNER: ${{ github.repository_owner }}
           CMS_PR_BODY: |

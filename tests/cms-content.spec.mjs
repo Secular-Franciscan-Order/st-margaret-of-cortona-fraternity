@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import test from "node:test";
 
 import {
@@ -314,6 +314,8 @@ test("treats JavaScript-like delimiters and import/export wording as prose", () 
 });
 
 test("caps diagnostics and rejects oversized CMS Markdown before parsing", () => {
+  assert.equal(CMS_MARKDOWN_LIMITS.maxBytes, 16 * 1024);
+
   const repeatedHtml = "<Badge>unsafe</Badge>\n\n".repeat(
     CMS_MARKDOWN_LIMITS.maxDiagnostics * 3
   );
@@ -332,23 +334,79 @@ test("caps diagnostics and rejects oversized CMS Markdown before parsing", () =>
   );
 });
 
-test("bounds large valid and unmatched-delimiter inputs", { timeout: 15_000 }, () => {
-  const largeValid = "Ordinary editor-native prose.\n".repeat(7_500);
-  assert.ok(Buffer.byteLength(markdown(largeValid)) < CMS_MARKDOWN_LIMITS.maxBytes);
+test("accepts a large valid file below the 16 KiB limit", () => {
+  const line = "Ordinary editor-native prose.\n";
+  const emptyBytes = Buffer.byteLength(markdown(""));
+  const repetitions = Math.floor(
+    (CMS_MARKDOWN_LIMITS.maxBytes - emptyBytes - 1) /
+      Buffer.byteLength(line)
+  );
+  const largeValid = line.repeat(repetitions);
+  const largeValidBytes = Buffer.byteLength(markdown(largeValid));
+  assert.ok(largeValidBytes < CMS_MARKDOWN_LIMITS.maxBytes);
+  assert.ok(largeValidBytes > CMS_MARKDOWN_LIMITS.maxBytes * 0.9);
   assert.deepEqual(
     validateMarkdownSource(markdown(largeValid), "large-valid.md").issues,
     []
   );
-
-  const unmatched = `${"{".repeat(100_000)}\n${"<".repeat(100_000)}`;
-  assert.ok(Buffer.byteLength(markdown(unmatched)) < CMS_MARKDOWN_LIMITS.maxBytes);
-  const started = performance.now();
-  const problems = validateMarkdownSource(markdown(unmatched), "unmatched.md").issues;
-  const elapsed = performance.now() - started;
-
-  assert.deepEqual(problems, []);
-  assert.ok(elapsed < 10_000, `unmatched input took ${elapsed.toFixed(0)}ms`);
 });
+
+test(
+  "bounds near-limit emphasis and unmatched delimiters in a subprocess",
+  { timeout: 15_000 },
+  () => {
+    const guardUrl = new URL(
+      "../scripts/check-cms-content.mjs",
+      import.meta.url
+    ).href;
+    const probeSource = `
+    import { performance } from "node:perf_hooks";
+    import { CMS_MARKDOWN_LIMITS, validateMarkdownSource } from ${JSON.stringify(guardUrl)};
+
+    const frontmatter = "---\\ntitle: Probe\\n---\\n";
+    const bodyBytes = CMS_MARKDOWN_LIMITS.maxBytes - Buffer.byteLength(frontmatter);
+    const half = Math.floor((bodyBytes - 1) / 2);
+    const fixtures = [
+      ["alternating-emphasis", "*_".repeat(Math.floor(bodyBytes / 2))],
+      ["unmatched-brace-angle", "{".repeat(half) + "\\n" + "<".repeat(bodyBytes - half - 1)]
+    ];
+    const report = [];
+
+    for (const [name, body] of fixtures) {
+      const source = frontmatter + body;
+      const bytes = Buffer.byteLength(source);
+      if (bytes > CMS_MARKDOWN_LIMITS.maxBytes || bytes < CMS_MARKDOWN_LIMITS.maxBytes - 1) {
+        throw new Error(name + " fixture is not near the accepted byte limit: " + bytes);
+      }
+      const started = performance.now();
+      const issues = validateMarkdownSource(source, name + ".md").issues;
+      report.push({ name, bytes, elapsedMs: performance.now() - started, issues });
+      if (issues.length !== 0) throw new Error(name + " produced diagnostics");
+    }
+
+    console.log(JSON.stringify(report));
+  `;
+    const probe = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", probeSource],
+      { encoding: "utf8", timeout: 10_000 }
+    );
+
+    assert.equal(probe.error, undefined, probe.error?.message);
+    assert.equal(probe.status, 0, probe.stderr);
+    const report = JSON.parse(probe.stdout);
+    assert.deepEqual(
+      report.map(({ name }) => name),
+      ["alternating-emphasis", "unmatched-brace-angle"]
+    );
+    assert.ok(
+      report.every(
+        ({ bytes, issues }) =>
+          bytes <= CMS_MARKDOWN_LIMITS.maxBytes && issues.length === 0
+      )
+    );
+  }
+);
 
 test("validates inline, reference, image, definition, and autolink destinations", () => {
   const safeBodies = [

@@ -72,14 +72,25 @@ export function parseCmsReviewPayload(
     throw new Error("Pages CMS action must dispatch cms-review.yml from main.");
   }
 
-  const branch = requiredString(repository.ref, "Pages CMS branch");
-  validateCmsBranch(branch);
-  const sha = requiredString(repository.sha, "Pages CMS head SHA");
-  if (!FULL_SHA.test(sha)) {
-    throw new Error("Pages CMS head SHA must be an exact 40-character commit SHA.");
+  const workflowSha = requiredString(
+    repository.sha,
+    "Pages CMS workflow SHA"
+  );
+  if (!FULL_SHA.test(workflowSha)) {
+    throw new Error(
+      "Pages CMS workflow SHA must be an exact 40-character commit SHA."
+    );
+  }
+  if (workflowSha !== trustedSha) {
+    throw new Error(
+      "Pages CMS workflow SHA must match the exact trusted main revision."
+    );
   }
 
-  return { branch, sha };
+  const branch = requiredString(repository.ref, "Pages CMS branch");
+  validateCmsBranch(branch);
+
+  return { branch };
 }
 
 function isMainModule() {
@@ -94,8 +105,10 @@ if (isMainModule()) {
       trustedSha: process.env.TRUSTED_SHA || ""
     });
     const output = requiredString(process.env.GITHUB_OUTPUT, "GITHUB_OUTPUT");
-    appendFileSync(output, `branch=${result.branch}\nsha=${result.sha}\n`, "utf8");
-    console.log(`Validated Pages CMS review request for ${result.branch} at ${result.sha}.`);
+    appendFileSync(output, `branch=${result.branch}\n`, "utf8");
+    console.log(
+      `Validated Pages CMS review request for ${result.branch} from trusted main ${process.env.TRUSTED_SHA}.`
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
