@@ -82,9 +82,12 @@ The explicit **Open review PR** action dispatches `cms-review.yml` at trusted
 `main`. Its write-capable job parses one bounded JSON payload, verifies its
 workflow SHA against the exact trusted `main` revision, validates and fetches
 the same-repository `cms/**` branch without checking it out, derives its exact
-head for the trusted changed-path gate, and re-fetches and rechecks that head
-immediately before and after draft-PR creation or reuse. CMS-head code runs only
-in ordinary read-only CI.
+head for the trusted changed-path gate, and re-fetches both `main` and the CMS
+head immediately before and after draft-PR creation or reuse. Exact
+same-repository filtering excludes fork PRs; the selected draft must use the
+trusted base SHA and the workflow restores and verifies the approved checklist
+and administrator warning body before success. CMS-head code runs only in
+ordinary read-only CI.
 Reviewers must still inspect the complete diff and preview before a human
 merge.
 

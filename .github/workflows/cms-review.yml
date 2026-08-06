@@ -78,9 +78,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CMS_BRANCH: ${{ steps.request.outputs.branch }}
           CMS_HEAD_SHA: ${{ steps.cms_head.outputs.sha }}
+          TRUSTED_SHA: ${{ github.sha }}
           GH_REPO: ${{ github.repository }}
           GH_REPO_OWNER: ${{ github.repository_owner }}
-          CMS_PR_BODY: |
+          CMS_PR_BODY: |-
             ## Pages CMS draft review
 
             **This change is not published.** This draft was opened explicitly from the trusted main workflow for an activated cms/** content branch. It must remain unmerged until every gate below is complete.
@@ -99,42 +100,77 @@ jobs:
         run: |
           set -eu
 
-          verify_remote_head() {
-            git fetch --no-tags origin "+refs/heads/$CMS_BRANCH:refs/remotes/origin/cms-review-head"
+          verify_remote_state() {
+            git fetch --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main \
+              "+refs/heads/$CMS_BRANCH:refs/remotes/origin/cms-review-head"
+            test "$(git rev-parse refs/remotes/origin/main)" = "$TRUSTED_SHA"
             test "$(git rev-parse refs/remotes/origin/cms-review-head)" = "$CMS_HEAD_SHA"
           }
 
           list_prs() {
-            gh pr list \
-              --repo "$GH_REPO" \
-              --state open \
-              --base main \
-              --head "$CMS_BRANCH" \
-              --json number,isDraft,headRefOid,baseRefName,headRepositoryOwner
+            gh api --method GET "repos/$GH_REPO/pulls" \
+              -f state=open \
+              -f base=main \
+              -f head="$GH_REPO_OWNER:$CMS_BRANCH" \
+              -F per_page=100 | jq -c \
+                --arg repo "$GH_REPO" \
+                --arg branch "$CMS_BRANCH" \
+                '[.[] | select(.state == "open" and .base.ref == "main" and .head.ref == $branch and .head.repo.full_name == $repo)]'
           }
 
           verify_one_pr() {
             pr_json="$1"
             test "$(printf '%s' "$pr_json" | jq -r \
-              --arg owner "$GH_REPO_OWNER" \
-              --arg sha "$CMS_HEAD_SHA" \
-              'length == 1 and .[0].baseRefName == "main" and .[0].headRepositoryOwner.login == $owner and .[0].headRefOid == $sha and .[0].isDraft == true')" = "true"
+              --arg repo "$GH_REPO" \
+              --arg branch "$CMS_BRANCH" \
+              --arg head "$CMS_HEAD_SHA" \
+              --arg base "$TRUSTED_SHA" \
+              'length == 1 and .[0].state == "open" and .[0].draft == true and .[0].base.ref == "main" and .[0].base.sha == $base and .[0].head.ref == $branch and .[0].head.sha == $head and .[0].head.repo.full_name == $repo')" = "true"
           }
 
-          verify_remote_head
+          verify_body() {
+            pr_json="$1"
+            test "$(printf '%s' "$pr_json" | jq -r \
+              --arg body "$CMS_PR_BODY" \
+              'length == 1 and .[0].body == $body')" = "true"
+          }
+
+          ensure_approved_body() {
+            pr_json="$1"
+            if ! verify_body "$pr_json"; then
+              pr_number="$(printf '%s' "$pr_json" | jq -r '.[0].number')"
+              gh api --method PATCH "repos/$GH_REPO/pulls/$pr_number" \
+                -f body="$CMS_PR_BODY" >/dev/null
+            fi
+          }
+
+          finalize_candidate() {
+            pr_json="$1"
+            message="$2"
+            verify_one_pr "$pr_json"
+            verify_remote_state
+            ensure_approved_body "$pr_json"
+            verify_remote_state
+            verified="$(list_prs)"
+            verify_one_pr "$verified"
+            verify_body "$verified"
+            verify_remote_state
+            printf '%s #%s.\n' "$message" "$(printf '%s' "$verified" | jq -r '.[0].number')"
+          }
+
           existing="$(list_prs)"
           count="$(printf '%s' "$existing" | jq 'length')"
           if test "$count" -gt 1; then
-            echo "More than one open PR targets main from $CMS_BRANCH; refusing to choose." >&2
+            echo "More than one exact same-repository draft-PR candidate exists for $CMS_BRANCH; refusing to choose." >&2
             exit 1
           fi
           if test "$count" -eq 1; then
-            verify_one_pr "$existing"
-            verify_remote_head
-            printf 'Reusing exact draft PR #%s.\n' "$(printf '%s' "$existing" | jq -r '.[0].number')"
+            finalize_candidate "$existing" "Reusing exact draft PR"
             exit 0
           fi
 
+          verify_remote_state
           set +e
           create_output="$(gh pr create \
             --repo "$GH_REPO" \
@@ -145,6 +181,7 @@ jobs:
             --body "$CMS_PR_BODY" 2>&1)"
           create_status=$?
           set -e
+          verify_remote_state
 
           created="$(list_prs)"
           if ! verify_one_pr "$created"; then
@@ -152,7 +189,7 @@ jobs:
             echo "PR creation did not produce exactly one matching draft PR at the requested head." >&2
             exit 1
           fi
-          verify_remote_head
+          finalize_candidate "$created" "Verified exact draft PR"
 
           if test "$create_status" -ne 0; then
             echo "A concurrent serialized request created the exact draft PR; reusing it."

@@ -175,11 +175,12 @@ comment on tracking issue #46 says `Activation complete`:
 The privileged draft-PR workflow checks out trusted `main`, validates the
 Pages CMS payload's workflow SHA against that exact revision, fetches the
 selected `cms/**` branch without checking it out, derives its exact head for the
-trusted changed-path gate, and re-fetches and rechecks that head immediately
-before and after draft-PR creation or reuse. CMS-head workflows and scripts run
-only in ordinary read-only CI. Human review of the full diff remains mandatory.
-A PR-only
-administrator bypass is an explicit, commented, audited exception after
+trusted changed-path gate, and re-fetches both `main` and the CMS head
+immediately before and after draft-PR creation or reuse. It ignores same-named
+fork PRs, binds the draft to the trusted base SHA, and restores and verifies the
+approved review body before success. CMS-head workflows and scripts run only in
+ordinary read-only CI. Human review of the full diff remains mandatory. A
+PR-only administrator bypass is an explicit, commented, audited exception after
 checks, diff, and preview review. Record the GitHub bypass reason; this is never
 permission to push directly to `main`.
 

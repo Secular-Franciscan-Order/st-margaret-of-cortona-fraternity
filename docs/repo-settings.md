@@ -68,9 +68,11 @@ the CMS freeze in effect, and stop.
   `ref: main`. That workflow accepts only the bounded `payload` JSON input,
   requires its workflow SHA to match the exact trusted `main` checkout,
   validates and fetches the same-repository `cms/**` branch, derives its exact
-  remote head for the trusted path gate, rechecks it before and after the
-  draft-PR operation, and never checks out or executes CMS-head code with its
-  pull-request token.
+  remote head for the trusted path gate, and rechecks both remote `main` and the
+  CMS head before and after the draft-PR operation. Exact owner-and-branch
+  filtering excludes fork PRs; the selected draft must use the trusted base SHA
+  and exact approved warning body. The workflow never checks out or executes
+  CMS-head code with its pull-request token.
 - Ordinary `cms/**` push and PR CI remains read-only and runs the shared deploy
   verification before Playwright.
 - Do not use GitHub Actions as a production deployer while Cloudflare Workers
