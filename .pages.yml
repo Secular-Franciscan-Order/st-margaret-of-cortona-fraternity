@@ -116,6 +116,7 @@ content:
       - name: body
         label: Body
         type: rich-text
+        description: Markdown only. HTML, Astro/JSX, expressions, directives, embedded components, and unsafe destinations are rejected.
         options:
           format: markdown
           media: images
@@ -151,6 +152,7 @@ content:
       - name: body
         label: Answer
         type: rich-text
+        description: Markdown only. HTML, Astro/JSX, expressions, directives, embedded components, and unsafe destinations are rejected.
         options:
           format: markdown
           media: images
@@ -186,6 +188,7 @@ content:
       - name: uploadedFile
         label: Uploaded document
         type: file
+        description: Select only an approved PDF from Documents.
         options:
           media: documents
           extensions: [pdf]
@@ -193,6 +196,7 @@ content:
       - name: externalUrl
         label: External URL
         type: string
+        description: Use only an http(s) URL or leave this blank.
         pattern:
           regex: "^$|^https?://"
           message: "Use an http(s) URL or leave this blank."
@@ -202,6 +206,7 @@ content:
       - name: body
         label: Description
         type: rich-text
+        description: Markdown only. HTML, Astro/JSX, expressions, directives, embedded components, and unsafe destinations are rejected.
         options:
           format: markdown
           media: images

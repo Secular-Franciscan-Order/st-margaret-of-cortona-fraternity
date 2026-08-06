@@ -53,6 +53,9 @@ Use trunk-based development:
 
 - `main` is the only long-lived branch.
 - Use short-lived branches: `feat/*`, `fix/*`, `chore/*`, `docs/*`.
+- Only after a current valid activation record on tracking issue #46, reserve
+  `cms/*` for Pages CMS draft-PR branches. While Pages CMS is frozen, do not
+  create or use `cms/*` through Pages CMS.
 - Open a PR for changes into `main`.
 - Keep PRs small enough to merge quickly after CI passes.
 

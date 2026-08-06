@@ -96,6 +96,12 @@ time.
 
 Pages CMS configuration lives in `.pages.yml`.
 
+**Pages CMS is frozen.** Do not use it or create a `cms/*` branch unless the
+latest valid state-transition comment on [tracking issue #46](https://github.com/Secular-Franciscan-Order/st-margaret-of-cortona-fraternity/issues/46)
+is an authorized `[pages-cms-activation:v1]` / `Activation complete` record.
+Missing, edited, malformed, or revoked activation evidence means the freeze is
+in effect. See [content ownership and the audited CMS boundary](docs/content-ownership.md).
+
 Editors can update:
 
 - site settings and contact information
@@ -107,10 +113,13 @@ Editors can update:
 
 Fixed page creation, deletion, and rename operations are disabled because the
 site depends on those route files existing. FAQ and resource entries can be
-created, edited, unpublished, and deleted through Pages CMS.
+created, edited, unpublished, and deleted through Pages CMS only after
+activation.
 
-Pages CMS commits directly to `main`. Branch protection and app permissions
-must continue to allow the Pages CMS app to write content updates.
+Pages CMS must never commit directly to `main`. After activation, `cms/*` is
+reserved for Pages CMS draft-PR branches and all CMS changes require the
+documented checks, preview, eligible approval, full-diff review, and human
+merge.
 
 ## Media Upload Rules
 
@@ -205,6 +214,8 @@ This repository uses trunk-based development:
 - `main` is the only long-lived branch and production source.
 - Work happens on short-lived branches such as `feat/*`, `fix/*`,
   `chore/*`, and `docs/*`.
+- Only after valid activation, `cms/*` is reserved for Pages CMS draft-PR
+  branches; it is not a general-purpose branch prefix.
 - Pull requests merge to `main` only after CI passes.
 - Unfinished work should use drafts, hidden routes, preview builds, or feature
   flags rather than long-lived branches.
