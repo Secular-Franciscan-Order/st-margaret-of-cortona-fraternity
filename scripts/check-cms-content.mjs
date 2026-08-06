@@ -607,6 +607,12 @@ function isEscaped(source, index) {
   return precedingBackslashes(source, index).count % 2 === 1;
 }
 
+function isMarkdownBlockPrefix(prefix) {
+  return /^[ \t]{0,3}(?:(?:>[ \t]*)|(?:(?:[-+*]|\d{1,9}[.)])[ \t]+))*$/.test(
+    prefix
+  );
+}
+
 function sourceLineAtOffset(source, offset, bodyStartLine) {
   let line = bodyStartLine;
   for (let index = 0; index < offset; index += 1) {
@@ -666,7 +672,7 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     const lineStart = source.lastIndexOf("\n", escapes.start - 1) + 1;
     if (
       escapes.count % 2 === 0 &&
-      /^[ \t]*$/.test(source.slice(lineStart, escapes.start))
+      isMarkdownBlockPrefix(source.slice(lineStart, escapes.start))
     ) {
       addExcludedSyntaxIssue(
         problems,
@@ -681,12 +687,20 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     }
   }
 
-  const directivePattern = /:{1,2}[A-Za-z][A-Za-z0-9_-]*(?=\[|\{|\s|$)/g;
+  const directivePattern =
+    /:{1,2}[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?(?![A-Za-z0-9_-]|:)/g;
   while ((match = directivePattern.exec(source))) {
     const offset = match.index;
     const escapes = precedingBackslashes(source, offset);
     const before = escapes.start === 0 ? "" : source[escapes.start - 1];
-    if (escapes.count % 2 === 0 && (escapes.start === 0 || /\s/.test(before))) {
+    const hasPhrasingBoundary =
+      before === "" || !/[:$_\u200C\u200D\p{ID_Continue}-]/u.test(before);
+    const next = source[offset + match[0].length];
+    const hasExplicitPayload = before !== ":" && (next === "[" || next === "{");
+    if (
+      escapes.count % 2 === 0 &&
+      (hasPhrasingBoundary || hasExplicitPayload)
+    ) {
       addExcludedSyntaxIssue(
         problems,
         file,
@@ -739,11 +753,20 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     }
   }
 
-  const jsxNamePattern = /^[A-Za-z_$][A-Za-z0-9_$-]*(?:[.:][A-Za-z_$][A-Za-z0-9_$-]*)*/;
+  const jsxIdentifier = "[$_\\p{ID_Start}][$_\\u200C\\u200D\\p{ID_Continue}-]*";
+  const jsxNamePattern = new RegExp(
+    `^${jsxIdentifier}(?:[.:]${jsxIdentifier})*`,
+    "u"
+  );
   for (let offset = 0; offset < source.length; offset += 1) {
     if (source[offset] !== "<" || isEscaped(source, offset)) continue;
-    const remainder = source.slice(offset + 1);
-    if (remainder.startsWith(">") || remainder.startsWith("/>")) {
+    let nameStart = offset + 1;
+    while (/\s/u.test(source[nameStart] || "")) nameStart += 1;
+    if (source[nameStart] === "/") {
+      nameStart += 1;
+      while (/\s/u.test(source[nameStart] || "")) nameStart += 1;
+    }
+    if (source[nameStart] === ">") {
       addExcludedSyntaxIssue(
         problems,
         file,
@@ -757,12 +780,13 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
       continue;
     }
 
-    const afterSlash = remainder.startsWith("/") ? remainder.slice(1) : remainder;
-    const name = jsxNamePattern.exec(afterSlash)?.[0];
+    const remainder = source.slice(nameStart);
+    const name = jsxNamePattern.exec(remainder)?.[0];
     if (!name) continue;
-    const boundary = afterSlash[name.length];
-    const componentLike = /^[A-Z]/.test(name) || name.includes(".") || name.includes(":");
-    if (componentLike && (boundary === undefined || /[\s/>]/.test(boundary))) {
+    const boundary = remainder[name.length];
+    const componentLike =
+      !/^[a-z]/.test(name) || name.includes(".") || name.includes(":");
+    if (componentLike && (boundary === undefined || /[\s/>]/u.test(boundary))) {
       addExcludedSyntaxIssue(
         problems,
         file,

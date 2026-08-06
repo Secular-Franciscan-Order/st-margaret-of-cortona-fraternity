@@ -214,9 +214,21 @@ test("rejects HTML, MDX, JSX/Astro, expressions, directives, and containers", ()
     ["<foo.Bar />", "markdown/jsx"],
     ["<foo:Bar />", "markdown/jsx"],
     ["<foo.Bar\n  prop=\"value\" />", "markdown/jsx"],
+    ["<\nComponent>unsafe</\nComponent>", "markdown/jsx"],
+    [`${"\\"}<Component>unsafe</\nComponent>`, "markdown/jsx"],
+    ["<Δ />", "markdown/jsx"],
+    ["<δ.Μέλος />", "markdown/jsx"],
+    ["<δ:Μέλος />", "markdown/jsx"],
     [":note[unsafe]", "markdown/directive"],
+    ["(:note[unsafe])", "markdown/directive"],
+    ["Text:note[unsafe]", "markdown/directive"],
+    ["(:note)", "markdown/directive"],
+    ["Text —:note[unsafe]", "markdown/directive"],
     ["::warning unsafe", "markdown/directive"],
-    [":::warning\nunsafe\n:::", "markdown/custom-container"]
+    [":::warning\nunsafe\n:::", "markdown/custom-container"],
+    ["> :::warning\n> unsafe\n> :::", "markdown/custom-container"],
+    ["- :::warning\n  unsafe\n  :::", "markdown/custom-container"],
+    ["> 1. :::warning\n>    unsafe\n>    :::", "markdown/custom-container"]
   ];
 
   for (const [body, rule] of fixtures) {
@@ -229,14 +241,25 @@ test("uses odd/even backslash parity and ignores complete code ranges", () => {
     `Literal ${"\\"}{ foo +\nbar }`,
     `Literal ${"\\"}<foo.Bar />`,
     `Literal ${"\\"}<foo:Bar />`,
+    `${"\\"}<\nComponent>literal${"\\"}</\nComponent>`,
+    `Literal ${"\\"}<Δ />`,
+    `Literal ${"\\"}<δ.Μέλος /> and ${"\\"}<δ:Μέλος />`,
     `Literal ${"\\"}:note[example]`,
+    `Literal (${"\\"}:note[example])`,
+    `Literal text${"\\"}:note[example]`,
     `${"\\"}:::literal container marker`,
+    `> ${"\\"}:::literal container marker`,
+    `- ${"\\"}:::literal container marker`,
     "exported values are prose",
     "export-ready values are prose",
     "importantly, this is prose",
     "We export/**/default wording as prose.",
-    "`{ unsafe +\nlooking } <foo.Bar /> export/**/default 1`",
-    "```mdx\n{ unsafe +\nlooking }\n<foo:Bar />\nexport/**/default 1\n```"
+    "Ordinary colon uses: https://example.com, 12:30, and key: value.",
+    "Literal namespace:name without directive payload.",
+    "`{ unsafe +\nlooking } <foo.Bar /> <Δ /> (:note[unsafe]) export/**/default 1`",
+    "```mdx\n{ unsafe +\nlooking }\n<foo:Bar />\n<\nComponent>unsafe</\nComponent>\n<Δ />\n(:note[unsafe])\n> :::warning\n> unsafe\n> :::\nexport/**/default 1\n```",
+    "> ```md\n> :::warning\n> fenced example\n> :::\n> ```",
+    "- ```md\n  :::warning\n  fenced example\n  :::\n  ```"
   ];
   for (const body of oddEscapes) {
     assert.deepEqual(
@@ -250,8 +273,14 @@ test("uses odd/even backslash parity and ignores complete code ranges", () => {
     [`Literal ${"\\".repeat(2)}{ foo +\nbar }`, "markdown/expression"],
     [`Literal ${"\\".repeat(2)}<foo.Bar />`, "markdown/jsx"],
     [`Literal ${"\\".repeat(2)}<foo:Bar />`, "markdown/jsx"],
+    [`${"\\".repeat(2)}<\nComponent>unsafe</\nComponent>`, "markdown/jsx"],
+    [`Literal ${"\\".repeat(2)}<Δ />`, "markdown/jsx"],
     [`Literal ${"\\".repeat(2)}:note[example]`, "markdown/directive"],
-    [`${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"]
+    [`Literal (${"\\".repeat(2)}:note[example])`, "markdown/directive"],
+    [`Literal text${"\\".repeat(2)}:note[example]`, "markdown/directive"],
+    [`${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"],
+    [`> ${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"],
+    [`- ${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"]
   ];
   for (const [body, rule] of evenEscapes) {
     assertFailsWith(validateMarkdownSource(markdown(body), "even.md").issues, rule);
