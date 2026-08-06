@@ -276,15 +276,27 @@ test("uses odd/even backslash parity and ignores complete code ranges", () => {
     "import food from the pantry when needed",
     "import food from './market.js' when needed",
     "import spices and herbs from the cupboard when needed",
+    "import food from the pantry when needed\n\nLater, use './market.js'.",
     "export goods support the economy",
     "export quality matters to everyone",
     "export function supports the economy",
     "export class goods improve trade",
     "export const value matters in this sentence",
     "export default",
+    "export default settings are preferred.",
+    "export default: use the standard settings.",
+    `export class goods improve trade\n\nLater, ${"\\"}{example${"\\"}}.`,
+    `export default settings are preferred.\n\nLater, ${"\\"}{example${"\\"}}.`,
+    `export goods support the economy.\n\nLater, ${"\\"}{example${"\\"}}.`,
     "We export/**/default wording as prose.",
     "Alpha < Beta",
     "α < β",
+    "Alpha < Beta > Gamma",
+    "α < β > γ",
+    "Alpha < Beta >= Gamma",
+    "α < β >= -γ",
+    "Alpha < Beta\n\nLater, 3 > 1.",
+    "α < β\n\nΑργότερα, 3 > 1.",
     "Alpha < Component without a tag close",
     "<\nscript without a tag terminator",
     "</\nsection without a tag terminator",
@@ -321,6 +333,29 @@ test("uses odd/even backslash parity and ignores complete code ranges", () => {
   for (const [body, rule] of evenEscapes) {
     assertFailsWith(validateMarkdownSource(markdown(body), "even.md").issues, rule);
   }
+});
+
+test("maps many excluded-syntax diagnostics without rescanning source prefixes", () => {
+  const count = 8192;
+  const body = ":note[unsafe]\n".repeat(count);
+  const problems = validateMarkdownSource(markdown(body), "many-lines.md").issues;
+  const directives = problems.filter((problem) => problem.rule === "markdown/directive");
+
+  assert.equal(directives.length, count);
+  assert.equal(directives[0].line, 4);
+  assert.equal(directives[Math.floor(count / 2)].line, 4 + Math.floor(count / 2));
+  assert.equal(directives.at(-1).line, count + 3);
+});
+
+test("does not rescan incomplete export prose into later escaped braces", () => {
+  const count = 4096;
+  const incompleteExports = "export class goods improve trade\n".repeat(count);
+  const body = `${incompleteExports}\nLater, ${"\\"}{example${"\\"}}.`;
+
+  assert.deepEqual(
+    validateMarkdownSource(markdown(body), "many-incomplete-exports.md").issues,
+    []
+  );
 });
 
 test("validates inline, reference, image, definition, and autolink destinations", () => {

@@ -615,6 +615,11 @@ function isMarkdownBlockPrefix(prefix) {
 
 const javascriptIdentifierPattern =
   /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*/u;
+const jsxIdentifier = "[$_\\p{ID_Start}][$_\\u200C\\u200D\\p{ID_Continue}-]*";
+const jsxNamePattern = new RegExp(
+  `^${jsxIdentifier}(?:[.:]${jsxIdentifier})*`,
+  "u"
+);
 
 function readJavascriptIdentifier(source, start) {
   const value = javascriptIdentifierPattern.exec(source.slice(start))?.[0];
@@ -759,74 +764,164 @@ function staticImportAt(source, offset) {
   return moduleSpecifierEnd(source, fromKeyword.end) !== null;
 }
 
-function variableExportAt(source, start, declaration) {
-  let trivia = skipJavascriptTrivia(source, start);
-  let bindingEnd;
-  if (source[trivia.index] === "{" || source[trivia.index] === "[") {
-    const open = source[trivia.index];
-    bindingEnd = balancedJavascriptEnd(
-      source,
-      trivia.index,
-      open,
-      open === "{" ? "}" : "]"
-    );
-  } else {
-    bindingEnd = readJavascriptIdentifier(source, trivia.index)?.end ?? null;
-  }
-  if (bindingEnd === null) return false;
-
-  trivia = skipJavascriptTrivia(source, bindingEnd);
-  if (source[trivia.index] === "=") {
-    const value = skipJavascriptTrivia(source, trivia.index + 1);
-    return value.complete && value.index < source.length;
-  }
+function javascriptStatementTailIsComplete(source, start) {
+  const trivia = skipJavascriptTrivia(source, start);
   return (
-    declaration !== "const" &&
+    trivia.complete &&
     (trivia.index >= source.length ||
       trivia.sawLineEnding ||
-      [",", ";"].includes(source[trivia.index]))
+      source[trivia.index] === ";")
   );
 }
 
-function functionExportAt(source, start, allowAnonymous) {
+function javascriptPrimaryExpressionEnd(source, start) {
+  let trivia = skipJavascriptTrivia(source, start);
+  if (!trivia.complete || trivia.index >= source.length) return null;
+  let end;
+  if (["\"", "'"].includes(source[trivia.index])) {
+    end = javascriptStringEnd(source, trivia.index);
+  } else if (/[0-9]/u.test(source[trivia.index])) {
+    const number = /^(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|0[oO][0-7]+|(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?)[n]?/u.exec(
+      source.slice(trivia.index)
+    )?.[0];
+    end = number ? trivia.index + number.length : null;
+  } else if (["(", "[", "{"].includes(source[trivia.index])) {
+    const open = source[trivia.index];
+    end = balancedJavascriptEnd(
+      source,
+      trivia.index,
+      open,
+      open === "(" ? ")" : open === "[" ? "]" : "}"
+    );
+  } else {
+    const unary = readJavascriptIdentifier(source, trivia.index);
+    if (unary && ["await", "delete", "typeof", "void"].includes(unary.value)) {
+      return javascriptPrimaryExpressionEnd(source, unary.end);
+    }
+    if (["!", "~", "+", "-"].includes(source[trivia.index])) {
+      return javascriptPrimaryExpressionEnd(source, trivia.index + 1);
+    }
+    end = readJavascriptIdentifier(source, trivia.index)?.end ?? null;
+  }
+  if (end === null) return null;
+
+  while (true) {
+    trivia = skipJavascriptTrivia(source, end);
+    if (!trivia.complete || trivia.sawLineEnding) return end;
+    if (source.startsWith("?.", trivia.index)) {
+      const property = readJavascriptIdentifier(source, trivia.index + 2);
+      if (!property) return end;
+      end = property.end;
+      continue;
+    }
+    if (source[trivia.index] === ".") {
+      const property = readJavascriptIdentifier(source, trivia.index + 1);
+      if (!property) return end;
+      end = property.end;
+      continue;
+    }
+    if (source[trivia.index] === "(" || source[trivia.index] === "[") {
+      const open = source[trivia.index];
+      const postfixEnd = balancedJavascriptEnd(
+        source,
+        trivia.index,
+        open,
+        open === "(" ? ")" : "]"
+      );
+      if (postfixEnd === null) return null;
+      end = postfixEnd;
+      continue;
+    }
+    return end;
+  }
+}
+
+function javascriptExportExpressionEnd(source, start) {
+  let end = javascriptPrimaryExpressionEnd(source, start);
+  if (end === null) return null;
+  while (true) {
+    const trivia = skipJavascriptTrivia(source, end);
+    if (!trivia.complete || trivia.sawLineEnding) return end;
+    const operator = /^(?:===|!==|>>>|>>|<<|\*\*|&&|\|\||\?\?|==|!=|<=|>=|=>|[+*/%<>&|^=-])/u.exec(
+      source.slice(trivia.index)
+    )?.[0];
+    if (!operator) return end;
+    const right = javascriptPrimaryExpressionEnd(
+      source,
+      trivia.index + operator.length
+    );
+    if (right === null) return null;
+    end = right;
+  }
+}
+
+function variableExportAt(source, start, declaration) {
+  let cursor = start;
+  while (true) {
+    let trivia = skipJavascriptTrivia(source, cursor);
+    let bindingEnd;
+    if (source[trivia.index] === "{" || source[trivia.index] === "[") {
+      const open = source[trivia.index];
+      bindingEnd = balancedJavascriptEnd(
+        source,
+        trivia.index,
+        open,
+        open === "{" ? "}" : "]"
+      );
+    } else {
+      bindingEnd = readJavascriptIdentifier(source, trivia.index)?.end ?? null;
+    }
+    if (bindingEnd === null) return false;
+
+    trivia = skipJavascriptTrivia(source, bindingEnd);
+    if (source[trivia.index] === "=") {
+      const valueEnd = javascriptExportExpressionEnd(source, trivia.index + 1);
+      if (valueEnd === null) return false;
+      cursor = valueEnd;
+    } else {
+      if (declaration === "const") return false;
+      cursor = bindingEnd;
+    }
+
+    trivia = skipJavascriptTrivia(source, cursor);
+    if (source[trivia.index] !== ",") {
+      return javascriptStatementTailIsComplete(source, cursor);
+    }
+    cursor = trivia.index + 1;
+  }
+}
+
+function functionExportEnd(source, start, allowAnonymous) {
   let trivia = skipJavascriptTrivia(source, start);
   if (source[trivia.index] === "*") {
     trivia = skipJavascriptTrivia(source, trivia.index + 1);
   }
   const name = readJavascriptIdentifier(source, trivia.index);
   if (name) trivia = skipJavascriptTrivia(source, name.end);
-  if (!name && !allowAnonymous) return false;
+  if (!name && !allowAnonymous) return null;
   const parametersEnd = balancedJavascriptEnd(source, trivia.index, "(", ")");
-  if (parametersEnd === null) return false;
+  if (parametersEnd === null) return null;
   trivia = skipJavascriptTrivia(source, parametersEnd);
-  return balancedJavascriptEnd(source, trivia.index, "{", "}") !== null;
+  return balancedJavascriptEnd(source, trivia.index, "{", "}");
 }
 
-function classExportAt(source, start, allowAnonymous) {
+function classExportEnd(source, start, allowAnonymous) {
   let trivia = skipJavascriptTrivia(source, start);
   const name = readJavascriptIdentifier(source, trivia.index);
   if (name) trivia = skipJavascriptTrivia(source, name.end);
-  if (!name && !allowAnonymous) return false;
+  if (!name && !allowAnonymous) return null;
 
-  for (let index = trivia.index; index < source.length; index += 1) {
-    if (source.startsWith("/*", index) || source.startsWith("//", index)) {
-      const comment = skipJavascriptTrivia(source, index);
-      if (!comment.complete) return false;
-      index = comment.index - 1;
-      continue;
-    }
-    if (["\"", "'", "`"].includes(source[index])) {
-      const end = javascriptStringEnd(source, index, source[index] === "`");
-      if (end === null) return false;
-      index = end - 1;
-      continue;
-    }
-    if (source[index] === ";") return false;
-    if (source[index] === "{") {
-      return balancedJavascriptEnd(source, index, "{", "}") !== null;
-    }
+  const extendsKeyword = readJavascriptIdentifier(source, trivia.index);
+  if (extendsKeyword?.value === "extends") {
+    const superclassEnd = javascriptExportExpressionEnd(
+      source,
+      extendsKeyword.end
+    );
+    if (superclassEnd === null) return null;
+    trivia = skipJavascriptTrivia(source, superclassEnd);
   }
-  return false;
+  if (source[trivia.index] !== "{") return null;
+  return balancedJavascriptEnd(source, trivia.index, "{", "}");
 }
 
 function staticExportAt(source, offset) {
@@ -841,11 +936,7 @@ function staticExportAt(source, offset) {
     if (fromKeyword?.value === "from") {
       return moduleSpecifierEnd(source, fromKeyword.end) !== null;
     }
-    return (
-      trivia.index >= source.length ||
-      trivia.sawLineEnding ||
-      source[trivia.index] === ";"
-    );
+    return javascriptStatementTailIsComplete(source, end);
   }
 
   if (source[trivia.index] === "*") {
@@ -871,64 +962,161 @@ function staticExportAt(source, offset) {
     return variableExportAt(source, declaration.end, declaration.value);
   }
   if (declaration.value === "function") {
-    return functionExportAt(source, declaration.end, false);
+    const end = functionExportEnd(source, declaration.end, false);
+    return end !== null && javascriptStatementTailIsComplete(source, end);
   }
   if (declaration.value === "class") {
-    return classExportAt(source, declaration.end, false);
+    const end = classExportEnd(source, declaration.end, false);
+    return end !== null && javascriptStatementTailIsComplete(source, end);
   }
   if (declaration.value === "async") {
     const functionKeyword = readJavascriptIdentifier(source, trivia.index);
-    return (
-      functionKeyword?.value === "function" &&
-      functionExportAt(source, functionKeyword.end, false)
-    );
+    if (functionKeyword?.value !== "function") return false;
+    const end = functionExportEnd(source, functionKeyword.end, false);
+    return end !== null && javascriptStatementTailIsComplete(source, end);
   }
   if (declaration.value !== "default") return false;
   if (trivia.index >= source.length || source[trivia.index] === ";") return false;
   const defaultKind = readJavascriptIdentifier(source, trivia.index);
   if (defaultKind?.value === "function") {
-    return functionExportAt(source, defaultKind.end, true);
+    const end = functionExportEnd(source, defaultKind.end, true);
+    return end !== null && javascriptStatementTailIsComplete(source, end);
   }
   if (defaultKind?.value === "class") {
-    return classExportAt(source, defaultKind.end, true);
+    const end = classExportEnd(source, defaultKind.end, true);
+    return end !== null && javascriptStatementTailIsComplete(source, end);
   }
-  return true;
+  const expressionEnd = javascriptExportExpressionEnd(source, trivia.index);
+  return (
+    expressionEnd !== null &&
+    javascriptStatementTailIsComplete(source, expressionEnd)
+  );
 }
 
-function jsxTagTerminator(source, start) {
-  let braceDepth = 0;
-  let quote = "";
-  for (let index = start; index < source.length; index += 1) {
-    if (quote) {
-      if (source[index] === quote && !isEscaped(source, index)) quote = "";
-      continue;
+function skipJsxWhitespace(source, start) {
+  let index = start;
+  let lineEndings = 0;
+  while (/\s/u.test(source[index] || "")) {
+    if (source[index] === "\r") {
+      lineEndings += 1;
+      if (source[index + 1] === "\n") index += 1;
+    } else if (source[index] === "\n") {
+      lineEndings += 1;
     }
-    if (["\"", "'", "`"].includes(source[index])) {
-      quote = source[index];
-      continue;
-    }
-    if (
-      braceDepth > 0 &&
-      (source.startsWith("/*", index) || source.startsWith("//", index))
-    ) {
-      const comment = skipJavascriptTrivia(source, index);
-      if (!comment.complete) return -1;
-      index = comment.index - 1;
-      continue;
-    }
-    if (source[index] === "{") braceDepth += 1;
-    else if (source[index] === "}" && braceDepth > 0) braceDepth -= 1;
-    else if (source[index] === ">" && braceDepth === 0) return index;
+    if (lineEndings > 1) return null;
+    index += 1;
   }
-  return -1;
+  return { index, lineEndings };
 }
 
-function sourceLineAtOffset(source, offset, bodyStartLine) {
-  let line = bodyStartLine;
-  for (let index = 0; index < offset; index += 1) {
-    if (source[index] === "\n") line += 1;
+function parseJsxTagTail(source, start) {
+  let cursor = start;
+  let hasExplicitAttributes = false;
+  while (cursor < source.length) {
+    const whitespace = skipJsxWhitespace(source, cursor);
+    if (!whitespace) return null;
+    cursor = whitespace.index;
+    if (source[cursor] === ">") {
+      return { end: cursor, selfClosing: false, hasExplicitAttributes };
+    }
+    if (source[cursor] === "/") {
+      const afterSlash = skipJsxWhitespace(source, cursor + 1);
+      if (!afterSlash || source[afterSlash.index] !== ">") return null;
+      return {
+        end: afterSlash.index,
+        selfClosing: true,
+        hasExplicitAttributes
+      };
+    }
+    if (source[cursor] === "{") {
+      const expressionEnd = balancedJavascriptEnd(source, cursor, "{", "}");
+      if (expressionEnd === null) return null;
+      hasExplicitAttributes = true;
+      cursor = expressionEnd;
+      continue;
+    }
+
+    const attribute = jsxNamePattern.exec(source.slice(cursor))?.[0];
+    if (!attribute) return null;
+    cursor += attribute.length;
+    const afterName = skipJsxWhitespace(source, cursor);
+    if (!afterName) return null;
+    cursor = afterName.index;
+    if (source[cursor] !== "=") continue;
+
+    hasExplicitAttributes = true;
+    const beforeValue = skipJsxWhitespace(source, cursor + 1);
+    if (!beforeValue) return null;
+    cursor = beforeValue.index;
+    if (["\"", "'"].includes(source[cursor])) {
+      const valueEnd = javascriptStringEnd(source, cursor);
+      if (valueEnd === null) return null;
+      cursor = valueEnd;
+    } else if (source[cursor] === "{") {
+      const valueEnd = balancedJavascriptEnd(source, cursor, "{", "}");
+      if (valueEnd === null) return null;
+      cursor = valueEnd;
+    } else {
+      const value = /^[^\s"'=<>`]+/u.exec(source.slice(cursor))?.[0];
+      if (!value) return null;
+      cursor += value.length;
+    }
   }
-  return line;
+  return null;
+}
+
+function isChainedComparison(source, tagStart, tagEnd) {
+  let leftIndex = tagStart - 1;
+  while (source[leftIndex] === " " || source[leftIndex] === "\t") leftIndex -= 1;
+  let leftStart = leftIndex;
+  if (
+    leftIndex > 0 &&
+    /[\uDC00-\uDFFF]/u.test(source[leftIndex]) &&
+    /[\uD800-\uDBFF]/u.test(source[leftIndex - 1])
+  ) {
+    leftStart -= 1;
+  }
+  let rightIndex = tagEnd + 1;
+  while (source[rightIndex] === " " || source[rightIndex] === "\t") rightIndex += 1;
+  if (source[rightIndex] === "=") {
+    rightIndex += 1;
+    while (source[rightIndex] === " " || source[rightIndex] === "\t") {
+      rightIndex += 1;
+    }
+  }
+  if (source[rightIndex] === "+" || source[rightIndex] === "-") {
+    rightIndex += 1;
+    while (source[rightIndex] === " " || source[rightIndex] === "\t") {
+      rightIndex += 1;
+    }
+  }
+  const left = source.slice(leftStart, leftIndex + 1);
+  const rightCodePoint = source.codePointAt(rightIndex);
+  const right =
+    rightCodePoint === undefined ? "" : String.fromCodePoint(rightCodePoint);
+  return (
+    /^[$_\u200C\u200D\p{ID_Continue})\]]$/u.test(left) &&
+    /^[$_\p{ID_Start}\p{N}(\[]$/u.test(right)
+  );
+}
+
+function sourceLineStarts(source) {
+  const starts = [0];
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === "\n") starts.push(index + 1);
+  }
+  return starts;
+}
+
+function sourceLineAtOffset(lineStarts, offset, bodyStartLine) {
+  let low = 0;
+  let high = lineStarts.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (lineStarts[middle] <= offset) low = middle + 1;
+    else high = middle;
+  }
+  return bodyStartLine + low - 1;
 }
 
 function maskNonScannableRanges(ast, body) {
@@ -953,7 +1141,7 @@ function maskNonScannableRanges(ast, body) {
 function addExcludedSyntaxIssue(
   problems,
   file,
-  source,
+  lineStarts,
   bodyStartLine,
   offset,
   rule,
@@ -963,7 +1151,7 @@ function addExcludedSyntaxIssue(
   problems.push(
     issue(
       file,
-      sourceLineAtOffset(source, offset, bodyStartLine),
+      sourceLineAtOffset(lineStarts, offset, bodyStartLine),
       rule,
       message,
       correction
@@ -973,6 +1161,7 @@ function addExcludedSyntaxIssue(
 
 function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
   const source = maskNonScannableRanges(ast, body);
+  const lineStarts = sourceLineStarts(source);
 
   const containerPattern = /:::/g;
   let match;
@@ -987,7 +1176,7 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
       addExcludedSyntaxIssue(
         problems,
         file,
-        source,
+        lineStarts,
         bodyStartLine,
         offset,
         "markdown/custom-container",
@@ -1014,7 +1203,7 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
       addExcludedSyntaxIssue(
         problems,
         file,
-        source,
+        lineStarts,
         bodyStartLine,
         offset,
         "markdown/directive",
@@ -1036,7 +1225,7 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     addExcludedSyntaxIssue(
       problems,
       file,
-      source,
+      lineStarts,
       bodyStartLine,
       offset,
       "markdown/mdx-esm",
@@ -1058,7 +1247,7 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
       addExcludedSyntaxIssue(
         problems,
         file,
-        source,
+        lineStarts,
         bodyStartLine,
         offset,
         "markdown/expression",
@@ -1069,24 +1258,23 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     }
   }
 
-  const jsxIdentifier = "[$_\\p{ID_Start}][$_\\u200C\\u200D\\p{ID_Continue}-]*";
-  const jsxNamePattern = new RegExp(
-    `^${jsxIdentifier}(?:[.:]${jsxIdentifier})*`,
-    "u"
-  );
   for (let offset = 0; offset < source.length; offset += 1) {
     if (source[offset] !== "<" || isEscaped(source, offset)) continue;
-    let nameStart = offset + 1;
-    while (/\s/u.test(source[nameStart] || "")) nameStart += 1;
+    let whitespace = skipJsxWhitespace(source, offset + 1);
+    if (!whitespace) continue;
+    let nameStart = whitespace.index;
+    let closing = false;
     if (source[nameStart] === "/") {
-      nameStart += 1;
-      while (/\s/u.test(source[nameStart] || "")) nameStart += 1;
+      closing = true;
+      whitespace = skipJsxWhitespace(source, nameStart + 1);
+      if (!whitespace) continue;
+      nameStart = whitespace.index;
     }
     if (source[nameStart] === ">") {
       addExcludedSyntaxIssue(
         problems,
         file,
-        source,
+        lineStarts,
         bodyStartLine,
         offset,
         "markdown/jsx",
@@ -1101,20 +1289,30 @@ function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
     if (!name) continue;
     const boundary = remainder[name.length];
     if (!/[\s/>]/u.test(boundary || "")) continue;
-    if (source.indexOf(">", nameStart + name.length) < 0) break;
-    const tagEnd = jsxTagTerminator(source, nameStart + name.length);
-    if (tagEnd >= 0) {
+    const tag = parseJsxTagTail(source, nameStart + name.length);
+    if (!tag) continue;
+    const hasStrongTagSignal =
+      closing ||
+      tag.selfClosing ||
+      tag.hasExplicitAttributes ||
+      name.includes(".") ||
+      name.includes(":") ||
+      ["embed", "iframe", "object", "script", "style"].includes(name);
+    if (
+      hasStrongTagSignal ||
+      !isChainedComparison(source, offset, tag.end)
+    ) {
       addExcludedSyntaxIssue(
         problems,
         file,
-        source,
+        lineStarts,
         bodyStartLine,
         offset,
         "markdown/jsx",
         "JSX/Astro component syntax is not allowed.",
         "Remove the component markup or put a non-executed example in code."
       );
-      offset = tagEnd;
+      offset = tag.end;
     }
   }
 }
