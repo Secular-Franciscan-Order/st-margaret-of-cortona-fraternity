@@ -12,8 +12,27 @@ export interface MarkdownBodyExpectation {
 }
 
 export interface MarkdownBlockExpectation {
-  tagName: "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote" | "ol" | "ul" | "pre" | "hr";
+  tagName:
+    | "p"
+    | "h1"
+    | "h2"
+    | "h3"
+    | "h4"
+    | "h5"
+    | "h6"
+    | "blockquote"
+    | "ol"
+    | "ul"
+    | "pre"
+    | "hr";
+  authoredTextSegments: string[];
   authoredLinkHrefs: string[];
+  authoredImages: MarkdownImageExpectation[];
+}
+
+export interface MarkdownImageExpectation {
+  src: string;
+  alt: string;
 }
 
 export interface SiteExpectation {
@@ -75,9 +94,24 @@ type TraversableMarkdownNode = {
   children?: TraversableMarkdownNode[];
   identifier?: string;
   url?: string;
+  value?: string;
+  alt?: string | null;
 };
 
 const defaultRepositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+
+export function normalizeRenderedTypography(value: string) {
+  return value
+    .replace(/\.(?:\s+\.){2,}/g, "...")
+    .replace(/\.{3,}/g, "...")
+    .replace(/…/g, "...")
+    .replace(/''|``/g, '"')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/—/g, "--")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function requireRecord(value: unknown, context: string): UnknownRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -216,6 +250,79 @@ function collectAuthoredLinks(
   return hrefs;
 }
 
+function collectAuthoredTextSegments(
+  block: TraversableMarkdownNode,
+  source: string
+): string[] {
+  const segments: string[] = [];
+
+  function visit(node: TraversableMarkdownNode) {
+    if (
+      node.type === "text" ||
+      node.type === "inlineCode" ||
+      node.type === "code"
+    ) {
+      if (typeof node.value !== "string") {
+        throw new Error(`Invalid Markdown ${node.type} node in ${source}.`);
+      }
+
+      if (node.value.trim().length > 0) {
+        segments.push(node.value);
+      }
+      return;
+    }
+
+    if (node.type === "image" || node.type === "imageReference") {
+      return;
+    }
+
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  }
+
+  visit(block);
+  return segments;
+}
+
+function collectAuthoredImages(
+  block: TraversableMarkdownNode,
+  definitions: ReadonlyMap<string, string>,
+  source: string
+): MarkdownImageExpectation[] {
+  const images: MarkdownImageExpectation[] = [];
+
+  function visit(node: TraversableMarkdownNode) {
+    if (node.type === "image" || node.type === "imageReference") {
+      if (typeof node.alt !== "string") {
+        throw new Error(`Invalid Markdown ${node.type} alt text in ${source}.`);
+      }
+
+      let src: string | undefined;
+
+      if (node.type === "image") {
+        src = node.url;
+      } else if (typeof node.identifier === "string") {
+        src = definitions.get(node.identifier.toLowerCase());
+      }
+
+      if (src === undefined) {
+        throw new Error(`Unresolved Markdown image in ${source}.`);
+      }
+
+      images.push({ src, alt: node.alt });
+      return;
+    }
+
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  }
+
+  visit(block);
+  return images;
+}
+
 function renderedTagName(
   node: RootMarkdownNode,
   source: string
@@ -262,7 +369,9 @@ function loadMarkdown(path: string): {
       ? [
           {
             tagName,
-            authoredLinkHrefs: collectAuthoredLinks(node, definitions, path)
+            authoredTextSegments: collectAuthoredTextSegments(node, path),
+            authoredLinkHrefs: collectAuthoredLinks(node, definitions, path),
+            authoredImages: collectAuthoredImages(node, definitions, path)
           }
         ]
       : [];

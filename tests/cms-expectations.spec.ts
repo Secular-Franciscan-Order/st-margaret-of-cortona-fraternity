@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   expectedDocumentTitle,
   loadCmsExpectations,
+  normalizeRenderedTypography,
   requirePageExpectation
 } from "./helpers/cms-expectations.ts";
 
@@ -19,6 +20,35 @@ function write(root: string, path: string, contents: string) {
 function markdown(frontmatter: string, body = "Fixture body.") {
   return `---\n${frontmatter}\n---\n\n${body}\n`;
 }
+
+const fixtureParagraph = {
+  tagName: "p",
+  authoredTextSegments: ["Fixture body."],
+  authoredLinkHrefs: [],
+  authoredImages: []
+};
+
+const fixtureBody = {
+  renderable: true,
+  renderedBlockCount: 1,
+  blocks: [fixtureParagraph]
+};
+
+const emptyBody = {
+  renderable: false,
+  renderedBlockCount: 0,
+  blocks: []
+};
+
+test("normalizes Astro smart typography without changing prose meaning", () => {
+  const source = `"Double" and 'single' plus ''backticks'', foo -- bar, . . ., ..., and .....`;
+  const rendered = `“Double” and ‘single’ plus ”backticks”, foo — bar, …, …, and …`;
+
+  assert.equal(
+    normalizeRenderedTypography(source),
+    normalizeRenderedTypography(rendered)
+  );
+});
 
 function writeFixture(root: string) {
   write(
@@ -40,7 +70,7 @@ function writeFixture(root: string) {
     "src/content/pages/home.md",
     markdown(
       "title: Fixture Home\nroute: /\nnavLabel: Home\nnavOrder: 20",
-      "## Editor heading\n\nBody with a [nested link](https://example.com)."
+      "## Editor heading\n\nBody with a [nested link](https://example.com).\n\n![Inline fixture](/uploads/images/fixture.webp)"
     )
   );
   write(
@@ -86,7 +116,7 @@ function writeFixture(root: string) {
     "src/content/resources/nested/text-only.md",
     markdown(
       "title: Text-only resource\norder: 30",
-      "Body with an editor-authored [nested link][body-link] and [empty link][empty-link].\n\n[body-link]: https://example.com/body\n[empty-link]: <>"
+      "Body with an editor-authored [nested link][body-link] and [empty link][empty-link].\n\n![Reference fixture][body-image]\n\n[body-link]: https://example.com/body\n[empty-link]: <>\n[body-image]: /uploads/images/reference.png"
     )
   );
   write(
@@ -112,20 +142,31 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
     assert.equal(initialHome.title, "Fixture Home");
     assert.deepEqual(initialHome.body, {
       renderable: true,
-      renderedBlockCount: 2,
+      renderedBlockCount: 3,
       blocks: [
-        { tagName: "h2", authoredLinkHrefs: [] },
+        {
+          tagName: "h2",
+          authoredTextSegments: ["Editor heading"],
+          authoredLinkHrefs: [],
+          authoredImages: []
+        },
         {
           tagName: "p",
-          authoredLinkHrefs: ["https://example.com"]
+          authoredTextSegments: ["Body with a ", "nested link", "."],
+          authoredLinkHrefs: ["https://example.com"],
+          authoredImages: []
+        },
+        {
+          tagName: "p",
+          authoredTextSegments: [],
+          authoredLinkHrefs: [],
+          authoredImages: [
+            { src: "/uploads/images/fixture.webp", alt: "Inline fixture" }
+          ]
         }
       ]
     });
-    assert.deepEqual(initialFaqPage.body, {
-      renderable: false,
-      renderedBlockCount: 0,
-      blocks: []
-    });
+    assert.deepEqual(initialFaqPage.body, emptyBody);
     assert.deepEqual(
       initial.pages.map(({ navLabel }) => navLabel),
       ["Questions", "Home"]
@@ -135,19 +176,11 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
       [
         [
           "Published question",
-          {
-            renderable: true,
-            renderedBlockCount: 1,
-            blocks: [{ tagName: "p", authoredLinkHrefs: [] }]
-          }
+          fixtureBody
         ],
         [
           "Default published question",
-          {
-            renderable: true,
-            renderedBlockCount: 1,
-            blocks: [{ tagName: "p", authoredLinkHrefs: [] }]
-          }
+          fixtureBody
         ]
       ]
     );
@@ -165,17 +198,13 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
           "Uploaded resource",
           "Download fixture",
           "/uploads/documents/fixture.pdf",
-          { renderable: false, renderedBlockCount: 0, blocks: [] }
+          emptyBody
         ],
         [
           "Default resource",
           "View Default resource",
           "https://example.com/default.pdf",
-          {
-            renderable: true,
-            renderedBlockCount: 1,
-            blocks: [{ tagName: "p", authoredLinkHrefs: [] }]
-          }
+          fixtureBody
         ],
         [
           "Text-only resource",
@@ -183,11 +212,30 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
           "",
           {
             renderable: true,
-            renderedBlockCount: 1,
+            renderedBlockCount: 2,
             blocks: [
               {
                 tagName: "p",
-                authoredLinkHrefs: ["https://example.com/body", ""]
+                authoredTextSegments: [
+                  "Body with an editor-authored ",
+                  "nested link",
+                  " and ",
+                  "empty link",
+                  "."
+                ],
+                authoredLinkHrefs: ["https://example.com/body", ""],
+                authoredImages: []
+              },
+              {
+                tagName: "p",
+                authoredTextSegments: [],
+                authoredLinkHrefs: [],
+                authoredImages: [
+                  {
+                    src: "/uploads/images/reference.png",
+                    alt: "Reference fixture"
+                  }
+                ]
               }
             ]
           }
@@ -246,11 +294,7 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
     assert.equal(mutated.site.name, "Mutated Fraternity");
     assert.equal(mutatedHome.title, "Mutated Home");
     assert.equal(mutatedFaq.title, "Mutated Questions");
-    assert.deepEqual(mutatedHome.body, {
-      renderable: true,
-      renderedBlockCount: 1,
-      blocks: [{ tagName: "p", authoredLinkHrefs: [] }]
-    });
+    assert.deepEqual(mutatedHome.body, fixtureBody);
     assert.equal(
       expectedDocumentTitle(mutatedHome.title, mutated.site.name),
       "Mutated Home | Mutated Fraternity"
@@ -267,11 +311,7 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
       [
         [
           "Published question",
-          {
-            renderable: true,
-            renderedBlockCount: 1,
-            blocks: [{ tagName: "p", authoredLinkHrefs: [] }]
-          }
+          fixtureBody
         ]
       ]
     );
@@ -290,17 +330,13 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
           "Uploaded resource",
           "Download fixture",
           "/uploads/documents/fixture.pdf",
-          { renderable: false, renderedBlockCount: 0, blocks: [] }
+          emptyBody
         ],
         [
           "Default resource",
           "Read the update",
           "/uploads/documents/mutated.pdf",
-          {
-            renderable: true,
-            renderedBlockCount: 1,
-            blocks: [{ tagName: "p", authoredLinkHrefs: [] }]
-          }
+          fixtureBody
         ],
         [
           "Text-only resource",
@@ -308,11 +344,30 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
           "",
           {
             renderable: true,
-            renderedBlockCount: 1,
+            renderedBlockCount: 2,
             blocks: [
               {
                 tagName: "p",
-                authoredLinkHrefs: ["https://example.com/body", ""]
+                authoredTextSegments: [
+                  "Body with an editor-authored ",
+                  "nested link",
+                  " and ",
+                  "empty link",
+                  "."
+                ],
+                authoredLinkHrefs: ["https://example.com/body", ""],
+                authoredImages: []
+              },
+              {
+                tagName: "p",
+                authoredTextSegments: [],
+                authoredLinkHrefs: [],
+                authoredImages: [
+                  {
+                    src: "/uploads/images/reference.png",
+                    alt: "Reference fixture"
+                  }
+                ]
               }
             ]
           }

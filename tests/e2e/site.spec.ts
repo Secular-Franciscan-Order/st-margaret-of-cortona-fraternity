@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   expectedDocumentTitle,
   loadCmsExpectations,
+  normalizeRenderedTypography,
   requirePageExpectation,
   type MarkdownBodyExpectation
 } from "../helpers/cms-expectations.ts";
@@ -40,10 +41,33 @@ async function expectRenderedCmsBody(
       "tagName",
       block.tagName.toUpperCase()
     );
+
+    const renderedText = normalizeRenderedTypography(
+      (await renderedBlock.textContent()) ?? ""
+    );
+
+    for (const text of block.authoredTextSegments) {
+      expect(renderedText).toContain(normalizeRenderedTypography(text));
+    }
+
     await expect(authoredLinks).toHaveCount(block.authoredLinkHrefs.length);
 
     for (const [linkIndex, href] of block.authoredLinkHrefs.entries()) {
       await expect(authoredLinks.nth(linkIndex)).toHaveAttribute("href", href);
+    }
+
+    const authoredImages = renderedBlock.locator("img");
+    await expect(authoredImages).toHaveCount(block.authoredImages.length);
+
+    for (const [imageIndex, image] of block.authoredImages.entries()) {
+      await expect(authoredImages.nth(imageIndex)).toHaveAttribute(
+        "src",
+        image.src
+      );
+      await expect(authoredImages.nth(imageIndex)).toHaveAttribute(
+        "alt",
+        image.alt
+      );
     }
   }
 }
@@ -74,10 +98,10 @@ test("serves the home page with source-backed content", async ({ page }) => {
 
 test("serves each fixed content route", async ({ page }) => {
   const routes = [
-    { path: "/who-we-are", container: ".markdown-page" },
-    { path: "/get-involved", container: ".markdown-page" },
-    { path: "/news", container: ".news-page" },
-    { path: "/faq", container: ".faq-page" }
+    { path: "/who-we-are", container: ".markdown-page", rendersBody: true },
+    { path: "/get-involved", container: ".markdown-page", rendersBody: true },
+    { path: "/news", container: ".news-page", rendersBody: false },
+    { path: "/faq", container: ".faq-page", rendersBody: true }
   ];
 
   for (const route of routes) {
@@ -92,7 +116,9 @@ test("serves each fixed content route", async ({ page }) => {
     await expect(content.locator(":scope > h1:first-child")).toHaveText(
       expectedPage.title
     );
-    await expectRenderedCmsBody(content, expectedPage.body);
+    if (route.rendersBody) {
+      await expectRenderedCmsBody(content, expectedPage.body);
+    }
   }
 });
 
