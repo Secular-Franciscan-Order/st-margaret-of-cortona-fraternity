@@ -485,12 +485,18 @@ export function validatePagesConfigSource(source, file = ".pages.yml") {
 }
 
 function decodedDestination(destination) {
+  const maximumDecodingRounds = 16;
   let value = destination;
 
-  for (let index = 0; index < 3 && /%[0-9a-f]{2}/i.test(value); index += 1) {
+  for (let index = 0; index < maximumDecodingRounds; index += 1) {
+    if (/%(?![0-9a-f]{2})/i.test(value)) {
+      return { error: "contains malformed percent encoding" };
+    }
+    if (!/%[0-9a-f]{2}/i.test(value)) return { value };
+
     try {
       const decoded = decodeURIComponent(value);
-      if (decoded === value) break;
+      if (decoded === value) return { value };
       value = decoded;
     } catch {
       return { error: "contains malformed percent encoding" };
@@ -499,6 +505,9 @@ function decodedDestination(destination) {
 
   if (/%(?![0-9a-f]{2})/i.test(value)) {
     return { error: "contains malformed percent encoding" };
+  }
+  if (/%[0-9a-f]{2}/i.test(value)) {
+    return { error: "exceeds the safe percent-decoding limit" };
   }
 
   return { value };
@@ -588,57 +597,181 @@ function sourceLine(node, bodyStartLine) {
   return (node.position?.start?.line ?? 1) + bodyStartLine - 1;
 }
 
-function scanExcludedTextSyntax(node, body, file, bodyStartLine, problems) {
-  if (node.type !== "text" || !node.position) return;
-  const start = node.position.start.offset ?? 0;
-  const end = node.position.end.offset ?? start;
-  const raw = body.slice(start, end);
-  const patterns = [
-    {
-      rule: "markdown/custom-container",
-      regex: /(^|\n)[ \t]*:::/g,
-      message: "Custom ::: containers are not allowed.",
-      correction: "Use an ordinary heading, paragraph, list, blockquote, or fenced code block."
-    },
-    {
-      rule: "markdown/directive",
-      regex: /(^|[\s])(?<!\\):{1,2}[A-Za-z][A-Za-z0-9_-]*(?=\[|\{|\s|$)/g,
-      message: "Markdown directives are not allowed.",
-      correction: "Use ordinary Markdown, or escape the leading colon when it is literal text."
-    },
-    {
-      rule: "markdown/mdx-esm",
-      regex: /(^|\n)[ \t]*(?:import|export)[ \t]+/g,
-      message: "MDX import/export syntax is not allowed.",
-      correction: "Remove executable module syntax or put a non-executed example in code."
-    },
-    {
-      rule: "markdown/expression",
-      regex: /(?<!\\)\{[^{}\n]*(?<!\\)\}/g,
-      message: "Executable expression syntax is not allowed.",
-      correction: "Remove the expression, escape literal braces, or put a non-executed example in code."
-    },
-    {
-      rule: "markdown/jsx",
-      regex: /(?<!\\)<(?:\/?>|\/?[A-Z][A-Za-z0-9._:-]*(?:\s|\/?>))/g,
-      message: "JSX/Astro component syntax is not allowed.",
-      correction: "Remove the component markup or put a non-executed example in code."
-    }
-  ];
+function precedingBackslashes(source, index) {
+  let start = index;
+  while (start > 0 && source[start - 1] === "\\") start -= 1;
+  return { count: index - start, start };
+}
 
-  for (const pattern of patterns) {
-    pattern.regex.lastIndex = 0;
-    let match;
-    while ((match = pattern.regex.exec(raw))) {
-      const lineOffset = raw.slice(0, match.index).split("\n").length - 1;
-      problems.push(
-        issue(
-          file,
-          sourceLine(node, bodyStartLine) + lineOffset,
-          pattern.rule,
-          pattern.message,
-          pattern.correction
-        )
+function isEscaped(source, index) {
+  return precedingBackslashes(source, index).count % 2 === 1;
+}
+
+function sourceLineAtOffset(source, offset, bodyStartLine) {
+  let line = bodyStartLine;
+  for (let index = 0; index < offset; index += 1) {
+    if (source[index] === "\n") line += 1;
+  }
+  return line;
+}
+
+function maskNonScannableRanges(ast, body) {
+  const masked = body.split("");
+
+  function visit(node) {
+    if (["code", "inlineCode", "html"].includes(node.type) && node.position) {
+      const start = node.position.start.offset ?? 0;
+      const end = node.position.end.offset ?? start;
+      for (let index = start; index < end; index += 1) {
+        if (masked[index] !== "\n") masked[index] = " ";
+      }
+      return;
+    }
+    for (const child of node.children || []) visit(child);
+  }
+
+  visit(ast);
+  return masked.join("");
+}
+
+function addExcludedSyntaxIssue(
+  problems,
+  file,
+  source,
+  bodyStartLine,
+  offset,
+  rule,
+  message,
+  correction
+) {
+  problems.push(
+    issue(
+      file,
+      sourceLineAtOffset(source, offset, bodyStartLine),
+      rule,
+      message,
+      correction
+    )
+  );
+}
+
+function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
+  const source = maskNonScannableRanges(ast, body);
+
+  const containerPattern = /:::/g;
+  let match;
+  while ((match = containerPattern.exec(source))) {
+    const offset = match.index;
+    const escapes = precedingBackslashes(source, offset);
+    const lineStart = source.lastIndexOf("\n", escapes.start - 1) + 1;
+    if (
+      escapes.count % 2 === 0 &&
+      /^[ \t]*$/.test(source.slice(lineStart, escapes.start))
+    ) {
+      addExcludedSyntaxIssue(
+        problems,
+        file,
+        source,
+        bodyStartLine,
+        offset,
+        "markdown/custom-container",
+        "Custom ::: containers are not allowed.",
+        "Use an ordinary heading, paragraph, list, blockquote, or fenced code block."
+      );
+    }
+  }
+
+  const directivePattern = /:{1,2}[A-Za-z][A-Za-z0-9_-]*(?=\[|\{|\s|$)/g;
+  while ((match = directivePattern.exec(source))) {
+    const offset = match.index;
+    const escapes = precedingBackslashes(source, offset);
+    const before = escapes.start === 0 ? "" : source[escapes.start - 1];
+    if (escapes.count % 2 === 0 && (escapes.start === 0 || /\s/.test(before))) {
+      addExcludedSyntaxIssue(
+        problems,
+        file,
+        source,
+        bodyStartLine,
+        offset,
+        "markdown/directive",
+        "Markdown directives are not allowed.",
+        "Use ordinary Markdown, or escape the leading colon when it is literal text."
+      );
+    }
+  }
+
+  const esmPattern = /(^|\n)[ \t]{0,3}(import|export)(?=$|[^A-Za-z0-9_$-])/g;
+  while ((match = esmPattern.exec(source))) {
+    const offset = match.index + match[0].lastIndexOf(match[2]);
+    addExcludedSyntaxIssue(
+      problems,
+      file,
+      source,
+      bodyStartLine,
+      offset,
+      "markdown/mdx-esm",
+      "MDX import/export syntax is not allowed.",
+      "Remove executable module syntax or put a non-executed example in code."
+    );
+  }
+
+  for (let offset = 0; offset < source.length; offset += 1) {
+    if (source[offset] !== "{" || isEscaped(source, offset)) continue;
+    let depth = 1;
+    let end = offset + 1;
+    for (; end < source.length && depth > 0; end += 1) {
+      if (isEscaped(source, end)) continue;
+      if (source[end] === "{") depth += 1;
+      else if (source[end] === "}") depth -= 1;
+    }
+    if (depth === 0) {
+      addExcludedSyntaxIssue(
+        problems,
+        file,
+        source,
+        bodyStartLine,
+        offset,
+        "markdown/expression",
+        "Executable expression syntax is not allowed.",
+        "Remove the expression, escape literal braces, or put a non-executed example in code."
+      );
+      offset = end - 1;
+    }
+  }
+
+  const jsxNamePattern = /^[A-Za-z_$][A-Za-z0-9_$-]*(?:[.:][A-Za-z_$][A-Za-z0-9_$-]*)*/;
+  for (let offset = 0; offset < source.length; offset += 1) {
+    if (source[offset] !== "<" || isEscaped(source, offset)) continue;
+    const remainder = source.slice(offset + 1);
+    if (remainder.startsWith(">") || remainder.startsWith("/>")) {
+      addExcludedSyntaxIssue(
+        problems,
+        file,
+        source,
+        bodyStartLine,
+        offset,
+        "markdown/jsx",
+        "JSX/Astro component syntax is not allowed.",
+        "Remove the component markup or put a non-executed example in code."
+      );
+      continue;
+    }
+
+    const afterSlash = remainder.startsWith("/") ? remainder.slice(1) : remainder;
+    const name = jsxNamePattern.exec(afterSlash)?.[0];
+    if (!name) continue;
+    const boundary = afterSlash[name.length];
+    const componentLike = /^[A-Z]/.test(name) || name.includes(".") || name.includes(":");
+    if (componentLike && (boundary === undefined || /[\s/>]/.test(boundary))) {
+      addExcludedSyntaxIssue(
+        problems,
+        file,
+        source,
+        bodyStartLine,
+        offset,
+        "markdown/jsx",
+        "JSX/Astro component syntax is not allowed.",
+        "Remove the component markup or put a non-executed example in code."
       );
     }
   }
@@ -729,10 +862,10 @@ function inspectMarkdown(ast, body, file, bodyStartLine, problems) {
       }
     }
 
-    scanExcludedTextSyntax(node, body, file, bodyStartLine, problems);
     for (const child of node.children || []) visit(child);
   }
   visit(ast);
+  scanExcludedSyntax(ast, body, file, bodyStartLine, problems);
 }
 
 export function validateMarkdownSource(source, file = "<markdown>") {

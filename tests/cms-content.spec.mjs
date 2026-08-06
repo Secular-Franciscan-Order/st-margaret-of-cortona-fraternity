@@ -36,6 +36,14 @@ function markdown(body, frontmatter = "title: Example") {
   return `---\n${frontmatter}\n---\n${body}\n`;
 }
 
+function encodeRepeatedly(value, rounds) {
+  let encoded = value;
+  for (let index = 0; index < rounds; index += 1) {
+    encoded = encodeURIComponent(encoded);
+  }
+  return encoded;
+}
+
 test("accepts the current complete Pages CMS configuration", () => {
   assert.deepEqual(validatePagesConfigSource(currentConfig), []);
 
@@ -198,8 +206,14 @@ test("rejects HTML, MDX, JSX/Astro, expressions, directives, and containers", ()
     ["<>fragment</>", "markdown/jsx"],
     ["import Map from './Map.astro'", "markdown/mdx-esm"],
     ["export const value = true", "markdown/mdx-esm"],
+    ["export/**/default 1", "markdown/mdx-esm"],
+    ["import{Map}from './Map.astro'", "markdown/mdx-esm"],
     ["Render {items.map(renderItem)} here.", "markdown/expression"],
+    ["Render { foo +\nbar } here.", "markdown/expression"],
     ["Render {} here.", "markdown/expression"],
+    ["<foo.Bar />", "markdown/jsx"],
+    ["<foo:Bar />", "markdown/jsx"],
+    ["<foo.Bar\n  prop=\"value\" />", "markdown/jsx"],
     [":note[unsafe]", "markdown/directive"],
     ["::warning unsafe", "markdown/directive"],
     [":::warning\nunsafe\n:::", "markdown/custom-container"]
@@ -210,6 +224,40 @@ test("rejects HTML, MDX, JSX/Astro, expressions, directives, and containers", ()
   }
 });
 
+test("uses odd/even backslash parity and ignores complete code ranges", () => {
+  const oddEscapes = [
+    `Literal ${"\\"}{ foo +\nbar }`,
+    `Literal ${"\\"}<foo.Bar />`,
+    `Literal ${"\\"}<foo:Bar />`,
+    `Literal ${"\\"}:note[example]`,
+    `${"\\"}:::literal container marker`,
+    "exported values are prose",
+    "export-ready values are prose",
+    "importantly, this is prose",
+    "We export/**/default wording as prose.",
+    "`{ unsafe +\nlooking } <foo.Bar /> export/**/default 1`",
+    "```mdx\n{ unsafe +\nlooking }\n<foo:Bar />\nexport/**/default 1\n```"
+  ];
+  for (const body of oddEscapes) {
+    assert.deepEqual(
+      validateMarkdownSource(markdown(body), "escaped.md").issues,
+      [],
+      body
+    );
+  }
+
+  const evenEscapes = [
+    [`Literal ${"\\".repeat(2)}{ foo +\nbar }`, "markdown/expression"],
+    [`Literal ${"\\".repeat(2)}<foo.Bar />`, "markdown/jsx"],
+    [`Literal ${"\\".repeat(2)}<foo:Bar />`, "markdown/jsx"],
+    [`Literal ${"\\".repeat(2)}:note[example]`, "markdown/directive"],
+    [`${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"]
+  ];
+  for (const [body, rule] of evenEscapes) {
+    assertFailsWith(validateMarkdownSource(markdown(body), "even.md").issues, rule);
+  }
+});
+
 test("validates inline, reference, image, definition, and autolink destinations", () => {
   const safeBodies = [
     "[web](http://example.com) [secure](HTTPS://example.com) [mail](mailto:editor@example.com)",
@@ -217,7 +265,12 @@ test("validates inline, reference, image, definition, and autolink destinations"
     "[reference][safe]\n\n[safe]: https://example.com/path",
     "![inline](/uploads/images/photo_1.JPEG)",
     "![reference][logo]\n\n[logo]: /uploads/images/logo.png",
-    "<https://example.com/path> <editor@example.com>"
+    "<https://example.com/path> <editor@example.com>",
+    `[encoded web](${encodeRepeatedly("https://example.com/safe-path", 6)})`,
+    `[encoded mail](${encodeRepeatedly("mailto:editor@example.com", 5)})`,
+    `[encoded root](${encodeRepeatedly("/news/safe-path", 5)})`,
+    `[encoded fragment](${encodeRepeatedly("#faq", 5)})`,
+    "[encoded unicode](https://example.com/%E2%9C%93)"
   ];
   for (const body of safeBodies) {
     assert.deepEqual(validateMarkdownSource(markdown(body), "safe-link.md").issues, []);
@@ -233,6 +286,9 @@ test("validates inline, reference, image, definition, and autolink destinations"
     "[x](java%73cript:alert(1))",
     "[x](java%0ascript:alert(1))",
     "[x](java%20script:alert(1))",
+    "[x](javascript%2525253Aalert(1))",
+    `[x](${encodeRepeatedly("javascript:alert", 6)})`,
+    `[x](${encodeRepeatedly("javascript:alert", 20)})`,
     "[x](https://)",
     "[x](bad%zz)",
     "[x][bad]\n\n[bad]: javascript:alert(1)",
