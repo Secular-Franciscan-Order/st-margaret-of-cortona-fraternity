@@ -45,11 +45,14 @@ pnpm dev
 pnpm check
 pnpm check:cms
 pnpm check:cms-changes -- --base-ref origin/main --head HEAD
+pnpm check:built-site
 pnpm check:uploads
 pnpm build
+pnpm verify:deploy
 pnpm test:worker
 pnpm test:e2e
 pnpm test:cms
+pnpm test:built-site
 pnpm preview
 pnpm deploy
 ```
@@ -58,15 +61,20 @@ Important command behavior:
 
 - `pnpm dev` runs the local Astro development server.
 - `pnpm check` runs the CMS content/configuration guard and Astro checks.
-- `pnpm check:cms` scans the real Pages CMS configuration and editable content.
+- `pnpm check:cms` scans the exact Pages CMS configuration and bounded editable
+  Markdown with both the renderer-facing and Pages-CMS-facing parsers.
 - `pnpm check:cms-changes` compares an exact head with current `main` and
   rejects changes outside the activated CMS ownership boundary.
 - `pnpm check:uploads` enforces local media upload limits.
-- `pnpm build` runs upload and CMS guards, Astro checks, and the static build.
+- `pnpm check:built-site` parses `dist` and enforces the code-owned location-map
+  invariant.
+- `pnpm build` and `pnpm verify:deploy` run the same upload, CMS, Astro, static
+  build, and built-output verification used by GitHub and Cloudflare.
 - `pnpm test:worker` runs Worker request-handling tests.
 - `pnpm test:e2e` runs Playwright smoke tests against `pnpm preview`.
 - `pnpm test:cms` runs the unsafe-content, configuration, and changed-path
   fixture suites.
+- `pnpm test:built-site` runs focused built-output invariant fixtures.
 - `pnpm deploy` deploys the built site with Wrangler.
 
 Build the site before running Playwright locally:
@@ -129,6 +137,11 @@ reserved for Pages CMS draft-PR branches and all CMS changes require the
 documented checks, preview, eligible approval, full-diff review, and human
 merge.
 
+The three Markdown body fields use the Pages CMS visual rich-text editor with
+the Source switch disabled. Raw HTML, iframe, details/summary, and
+component-like tags are not a lossless editing surface and are rejected; maps,
+embeds, forms, and layout stay in owner-reviewed Astro code.
+
 ### Conditional Pages CMS workflow
 
 Use this procedure only while the latest valid authorized state-transition
@@ -141,11 +154,14 @@ comment on tracking issue #46 says `Activation complete`:
    this order and the starting SHA.
 3. Make only the intended edits within the audited surfaces in
    `docs/content-ownership.md`.
-4. Wait for branch CI and exactly one automated draft PR. Do not create a
-   second PR for the branch.
-5. Manually approve the initial GitHub Actions run when GitHub requires that
+4. Save the intended CMS changes, wait for read-only branch CI, then select
+   **Open review PR** and confirm that the change is not published. The action
+   dispatches `cms-review.yml` from trusted `main` and opens or reuses exactly
+   one draft PR. Do not create a second PR for the branch.
+5. Manually approve an initial GitHub Actions run when GitHub requires that
    approval.
-6. Inspect the complete diff and Cloudflare preview, and require all configured
+6. Inspect the complete diff, shared deploy verification, and Cloudflare
+   preview, and require all configured
    checks to be green. Cloudflare Workers Builds remains the only preview and
    production integration.
 7. Mark the PR ready, resolve every conversation, update the branch from
@@ -156,16 +172,22 @@ comment on tracking issue #46 says `Activation complete`:
 9. A human merges only after all checks, preview, freshness, conversation,
    approval, and full-diff gates pass.
 
-The path gate prevents ordinary or accidental CMS scope drift, but branch code
-supplies its workflow and checker. It is not a hostile-code trust boundary;
-human review of the full diff is mandatory. A PR-only administrator bypass is
-an explicit, commented, audited exception after checks, diff, and preview
-review. It is never permission to push directly to `main`.
+The privileged draft-PR workflow checks out trusted `main`, validates the
+Pages CMS payload as bounded JSON data, fetches the exact CMS commit without
+checking it out, and runs the trusted changed-path gate before using its
+pull-request token. CMS-head workflows and scripts run only in ordinary
+read-only CI. Human review of the full diff remains mandatory. A PR-only
+administrator bypass is an explicit, commented, audited exception after
+checks, diff, and preview review. Record the GitHub bypass reason; this is never
+permission to push directly to `main`.
 
 The draft-PR workflow needs the repository setting **Allow GitHub Actions to
 create and approve pull requests**. Its first run can require manual workflow
 approval. Apply or test that setting and the required `main` rules only under a
 separately authorized rollout; see `docs/repo-settings.md`.
+
+Repeat the separately authorized disposable, unmerged rollout canary before
+adopting a new Pages CMS release or changing any rich-text capability.
 
 ## Media Upload Rules
 

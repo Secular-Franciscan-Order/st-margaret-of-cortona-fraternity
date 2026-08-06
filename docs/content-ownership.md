@@ -22,7 +22,7 @@ package files, and repository instructions remain code-owned.
 | `src/data/site.json` → `contact.email` | Required email string | Get Involved and footer `mailto:` links | Configuration allowlist, site-data schema, and human diff review | Approved content editor |
 | `src/data/site.json` → `contact.phone` | Required string | Get Involved contact section and footer | Configuration allowlist, site-data schema, and human diff review | Approved content editor |
 | `src/content/pages/home.md` | YAML frontmatter plus safe Markdown body; fixed route `/` | `src/pages/index.astro` | Strict YAML/frontmatter, safe-Markdown and destination checks, exact fixed-page map, Astro schema/build, and human preview/diff review | Approved content editor; route/file identity is code-owned |
-| `src/content/pages/who-we-are.md` | YAML frontmatter plus safe Markdown body; fixed route `/who-we-are` | `src/pages/[...slug].astro`; the map is separately code-owned | Same as fixed home page | Approved content editor; route/file identity and map are code-owned |
+| `src/content/pages/who-we-are.md` | YAML frontmatter plus safe Markdown body; fixed route `/who-we-are` | `src/pages/[...slug].astro`; the map is separately code-owned | Same as fixed home page, plus the parse5 built-map invariant | Approved content editor; route/file identity and map are code-owned |
 | `src/content/pages/get-involved.md` | YAML frontmatter plus safe Markdown body; fixed route `/get-involved` | `src/pages/[...slug].astro`; contact UI is separately code-owned | Same as fixed home page | Approved content editor; route/file identity and contact UI are code-owned |
 | `src/content/pages/news.md` | YAML frontmatter plus safe Markdown body; fixed route `/news` | `src/pages/news.astro` | Same as fixed home page | Approved content editor; route/file identity and resource layout are code-owned |
 | `src/content/pages/faq.md` | YAML frontmatter plus safe Markdown body; fixed route `/faq` | `src/pages/faq.astro` | Same as fixed home page | Approved content editor; route/file identity and FAQ layout are code-owned |
@@ -40,17 +40,27 @@ upload roots are code-owned and are not allowed CMS media changes.
 
 The safe Markdown subset is ordinary headings, paragraphs, emphasis,
 links/images, lists, blockquotes, thematic breaks, escaped punctuation,
-URL/email autolinks, inline code, and fenced code. Code spans and fenced code
-may show otherwise unsafe-looking examples because they are not executed.
+URL/email autolinks, inline code, fenced code, and hard breaks. Code spans and
+fenced code may show otherwise unsafe-looking examples because they are not
+executed. Tables, strikethrough, and task-list tokens are outside the approved
+editor-native subset.
 
-HTML, comments/declarations, MDX, JSX/Astro, executable expressions,
-directives, and custom `:::` containers are forbidden outside code. Links may
-use HTTP, HTTPS, or `mailto`, or be root-relative, document-relative, or
-fragment-only. Protocol-relative destinations, other schemes, controls,
-obfuscated schemes, and invalid URL forms are forbidden. Markdown images may
-refer only to `/uploads/images/<safe-filename>.(webp|jpg|jpeg|png)` with no
-traversal, encoded separators, query, fragment, external host, or other
-extension.
+Raw HTML, comments/declarations, iframe, details/summary, and component-like
+raw tags are forbidden outside code. Ordinary comparison, brace, directive-like,
+and import/export wording is inert prose in this repository's `.md` files; the
+guard does not attempt to parse it as JavaScript. Links may use HTTP, HTTPS, or
+`mailto`, or be root-relative, document-relative, or fragment-only.
+Protocol-relative destinations, other schemes, controls, obfuscated schemes,
+and invalid URL forms are forbidden. Markdown images may refer only to
+`/uploads/images/<safe-filename>.(webp|jpg|jpeg|png)` with no traversal, encoded
+separators, query, fragment, external host, or other extension.
+
+The guard uses `mdast-util-from-markdown@2.0.3` for renderer-facing structure
+and the same `marked@17.0.5` tokenizer version used by Pages CMS 2.1.8 for the
+editor-facing boundary. Each Markdown file is limited to 256 KiB and the
+repository scan reports at most 50 diagnostics. The visual editor's Source
+switch is disabled on every rich-text field; unsupported raw source is not a
+lossless CMS editing surface.
 
 ## Code-owned boundary
 
@@ -61,10 +71,20 @@ collection definitions, and frontmatter schemas. In particular,
 `LocationMap.astro` and its placement on `/who-we-are` are code-owned even
 though adjacent prose is CMS-owned.
 
-The changed-path check prevents ordinary or accidental CMS scope drift. It is
-not a hostile-code trust boundary because a branch can alter the workflow or
-checker code it executes. Reviewers must still inspect the complete diff and
-preview before a human merge.
+Future variable maps or embeds must use narrow structured data, such as a
+reviewed provider plus identifier/URL, rendered by an owner-reviewed Astro
+component. Arbitrary iframe or HTML fields are not an approved extension. If
+lossless raw source is ever required, use a separately reviewed Pages CMS
+`code` or `text` field or a pinned self-hosted editor; do not expose it through
+the visual rich-text field.
+
+The explicit **Open review PR** action dispatches `cms-review.yml` at trusted
+`main`. Its write-capable job parses one bounded JSON payload, verifies the
+same-repository `cms/**` branch and exact head, fetches that commit without
+checking it out, and runs the trusted-main changed-path checker before opening
+or reusing one draft PR. CMS-head code runs only in ordinary read-only CI.
+Reviewers must still inspect the complete diff and preview before a human
+merge.
 
 ## Audit record
 
@@ -81,16 +101,25 @@ The R6 audit was performed against base
 4. Every current editable file and frontmatter key: five fixed pages, thirteen
    FAQs, ten resources, three uploaded images, no uploaded PDF, and the
    code-owned `.gitkeep` placeholders.
-5. Markdown bodies for HTML/comments/declarations, MDX imports/exports,
-   JSX/Astro-like tags, brace expressions, directives, custom containers,
-   inline/reference links and images, and autolinks. No code-owned construct
-   remained in CMS content after the map moved to `LocationMap.astro`.
+5. Markdown bodies with both maintained parsers for raw HTML,
+   comments/declarations, iframe/details/component-like tags, non-native Marked
+   tokens, inline/reference links and images, and autolinks. Normal comparison,
+   import/export, brace, and directive-like prose remains inert. No code-owned
+   construct remained in CMS content after the map moved to
+   `LocationMap.astro`.
 6. Repository instructions for direct-main CMS guidance, `cms/*` branch
    ownership, activation claims, Actions PR permissions, and protection/ruleset
    guidance. The stale direct-main instruction was removed; the repository
    remains frozen pending an authoritative activation record.
 
+R7 retained that ownership audit, replaced the custom ESM/JSX scanner with the
+bounded maintained-parser boundary above, locked the explicit trusted-main
+review action, and added parse5 verification of the built code-owned map.
+
 Any new CMS path, field, rich-text surface, operation, media capability, or
 consumer is a code change: update this audit, the exact configuration allowlist,
 fixtures, and review documentation in an owner-approved change before exposing
 it to Pages CMS.
+
+Repeat the separately authorized disposable, unmerged Pages CMS canary before
+adopting a new Pages CMS release or changing any rich-text capability.

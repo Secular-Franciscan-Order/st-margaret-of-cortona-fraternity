@@ -3,6 +3,7 @@ import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { marked } from "marked";
 import {
   isAlias,
   isMap,
@@ -27,6 +28,52 @@ const CONTENT_ROOTS = [
   "src/content/resources"
 ];
 
+export const CMS_MARKDOWN_LIMITS = Object.freeze({
+  maxBytes: 256 * 1024,
+  maxDiagnostics: 50
+});
+
+const ALLOWED_MDAST_NODE_TYPES = new Set([
+  "root",
+  "blockquote",
+  "break",
+  "code",
+  "definition",
+  "emphasis",
+  "heading",
+  "image",
+  "imageReference",
+  "inlineCode",
+  "link",
+  "linkReference",
+  "list",
+  "listItem",
+  "paragraph",
+  "strong",
+  "text",
+  "thematicBreak"
+]);
+
+const ALLOWED_MARKED_TOKEN_TYPES = new Set([
+  "blockquote",
+  "br",
+  "code",
+  "codespan",
+  "def",
+  "em",
+  "escape",
+  "heading",
+  "hr",
+  "image",
+  "link",
+  "list",
+  "list_item",
+  "paragraph",
+  "space",
+  "strong",
+  "text"
+]);
+
 const CORE_YAML_TAGS = new Set([
   "tag:yaml.org,2002:map",
   "tag:yaml.org,2002:seq",
@@ -50,6 +97,20 @@ const EXPECTED_PAGES_CONFIG = {
       }
     }
   },
+  actions: [
+    {
+      name: "open-review-pr",
+      label: "Open review PR",
+      workflow: "cms-review.yml",
+      ref: "main",
+      confirm: {
+        title: "Open review PR?",
+        message:
+          "This change is not published. It still requires checks, preview, approval, and human merge.",
+        button: "Open review PR"
+      }
+    }
+  ],
   media: [
     {
       name: "images",
@@ -130,6 +191,7 @@ const EXPECTED_PAGES_CONFIG = {
           type: "rich-text",
           options: {
             format: "markdown",
+            switcher: false,
             media: "images",
             extensions: ["webp", "jpg", "jpeg", "png"],
             path: ".",
@@ -159,6 +221,7 @@ const EXPECTED_PAGES_CONFIG = {
           type: "rich-text",
           options: {
             format: "markdown",
+            switcher: false,
             media: "images",
             extensions: ["webp", "jpg", "jpeg", "png"],
             path: ".",
@@ -203,6 +266,7 @@ const EXPECTED_PAGES_CONFIG = {
           type: "rich-text",
           options: {
             format: "markdown",
+            switcher: false,
             media: "images",
             extensions: ["webp", "jpg", "jpeg", "png"],
             path: ".",
@@ -597,734 +661,132 @@ function sourceLine(node, bodyStartLine) {
   return (node.position?.start?.line ?? 1) + bodyStartLine - 1;
 }
 
-function precedingBackslashes(source, index) {
-  let start = index;
-  while (start > 0 && source[start - 1] === "\\") start -= 1;
-  return { count: index - start, start };
-}
-
-function isEscaped(source, index) {
-  return precedingBackslashes(source, index).count % 2 === 1;
-}
-
-function isMarkdownBlockPrefix(prefix) {
-  return /^[ \t]{0,3}(?:(?:>[ \t]*)|(?:(?:[-+*]|\d{1,9}[.)])[ \t]+))*$/.test(
-    prefix
-  );
-}
-
-const javascriptIdentifierPattern =
-  /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*/u;
-const jsxIdentifier = "[$_\\p{ID_Start}][$_\\u200C\\u200D\\p{ID_Continue}-]*";
-const jsxNamePattern = new RegExp(
-  `^${jsxIdentifier}(?:[.:]${jsxIdentifier})*`,
-  "u"
-);
-
-function readJavascriptIdentifier(source, start) {
-  const value = javascriptIdentifierPattern.exec(source.slice(start))?.[0];
-  return value ? { value, end: start + value.length } : null;
-}
-
-function skipJavascriptTrivia(source, start) {
-  let index = start;
-  let sawLineEnding = false;
-  while (index < source.length) {
-    if (/\s/u.test(source[index])) {
-      if (source[index] === "\n" || source[index] === "\r") {
-        sawLineEnding = true;
-      }
-      index += 1;
-      continue;
-    }
-    if (source.startsWith("/*", index)) {
-      const end = source.indexOf("*/", index + 2);
-      if (end < 0) return { index: source.length, sawLineEnding, complete: false };
-      if (/[\r\n]/u.test(source.slice(index, end + 2))) sawLineEnding = true;
-      index = end + 2;
-      continue;
-    }
-    if (source.startsWith("//", index)) {
-      const end = source.indexOf("\n", index + 2);
-      if (end < 0) return { index: source.length, sawLineEnding, complete: true };
-      sawLineEnding = true;
-      index = end + 1;
-      continue;
-    }
-    break;
-  }
-  return { index, sawLineEnding, complete: true };
-}
-
-function javascriptStringEnd(source, start, allowLineEndings = false) {
-  const quote = source[start];
-  if (!["\"", "'", "`"].includes(quote)) return null;
-  for (let index = start + 1; index < source.length; index += 1) {
-    if (source[index] === "\\") {
-      index += 1;
-      continue;
-    }
-    if (!allowLineEndings && /[\r\n]/u.test(source[index])) return null;
-    if (source[index] === quote) return index + 1;
-  }
-  return null;
-}
-
-function balancedJavascriptEnd(source, start, open, close) {
-  if (source[start] !== open) return null;
-  let depth = 1;
-  for (let index = start + 1; index < source.length; ) {
-    if (["\"", "'", "`"].includes(source[index])) {
-      const end = javascriptStringEnd(source, index, source[index] === "`");
-      if (end === null) return null;
-      index = end;
-      continue;
-    }
-    if (source.startsWith("/*", index) || source.startsWith("//", index)) {
-      const trivia = skipJavascriptTrivia(source, index);
-      if (!trivia.complete) return null;
-      index = trivia.index;
-      continue;
-    }
-    if (source[index] === open) depth += 1;
-    if (source[index] === close) {
-      depth -= 1;
-      if (depth === 0) return index + 1;
-    }
-    index += 1;
-  }
-  return null;
-}
-
-function moduleSpecifierTailIsComplete(source, start) {
-  let trivia = skipJavascriptTrivia(source, start);
-  if (!trivia.complete) return false;
-  if (
-    trivia.index >= source.length ||
-    trivia.sawLineEnding ||
-    source[trivia.index] === ";"
-  ) {
-    return true;
-  }
-
-  const attribute = readJavascriptIdentifier(source, trivia.index);
-  if (!attribute || !["assert", "with"].includes(attribute.value)) return false;
-  trivia = skipJavascriptTrivia(source, attribute.end);
-  const end = balancedJavascriptEnd(source, trivia.index, "{", "}");
-  return end !== null && moduleSpecifierTailIsComplete(source, end);
-}
-
-function moduleSpecifierEnd(source, start) {
-  const trivia = skipJavascriptTrivia(source, start);
-  if (!trivia.complete) return null;
-  const end = javascriptStringEnd(source, trivia.index);
-  return end !== null && moduleSpecifierTailIsComplete(source, end) ? end : null;
-}
-
-function namespaceImportEnd(source, start) {
-  if (source[start] !== "*") return null;
-  let trivia = skipJavascriptTrivia(source, start + 1);
-  const asKeyword = readJavascriptIdentifier(source, trivia.index);
-  if (!asKeyword || asKeyword.value !== "as") return null;
-  trivia = skipJavascriptTrivia(source, asKeyword.end);
-  return readJavascriptIdentifier(source, trivia.index)?.end ?? null;
-}
-
-function staticImportAt(source, offset) {
-  let trivia = skipJavascriptTrivia(source, offset + "import".length);
-  if (!trivia.complete) return false;
-  if (["\"", "'"].includes(source[trivia.index])) {
-    const end = javascriptStringEnd(source, trivia.index);
-    return end !== null && moduleSpecifierTailIsComplete(source, end);
-  }
-
-  let clauseEnd;
-  if (source[trivia.index] === "{") {
-    clauseEnd = balancedJavascriptEnd(source, trivia.index, "{", "}");
-  } else if (source[trivia.index] === "*") {
-    clauseEnd = namespaceImportEnd(source, trivia.index);
-  } else {
-    const defaultBinding = readJavascriptIdentifier(source, trivia.index);
-    if (!defaultBinding) return false;
-    trivia = skipJavascriptTrivia(source, defaultBinding.end);
-    clauseEnd = defaultBinding.end;
-    if (source[trivia.index] === ",") {
-      trivia = skipJavascriptTrivia(source, trivia.index + 1);
-      clauseEnd =
-        source[trivia.index] === "{"
-          ? balancedJavascriptEnd(source, trivia.index, "{", "}")
-          : namespaceImportEnd(source, trivia.index);
-    }
-  }
-  if (clauseEnd === null || clauseEnd === undefined) return false;
-
-  trivia = skipJavascriptTrivia(source, clauseEnd);
-  const fromKeyword = readJavascriptIdentifier(source, trivia.index);
-  if (!fromKeyword || fromKeyword.value !== "from") return false;
-  return moduleSpecifierEnd(source, fromKeyword.end) !== null;
-}
-
-function javascriptStatementTailIsComplete(source, start) {
-  const trivia = skipJavascriptTrivia(source, start);
-  return (
-    trivia.complete &&
-    (trivia.index >= source.length ||
-      trivia.sawLineEnding ||
-      source[trivia.index] === ";")
-  );
-}
-
-function javascriptPrimaryExpressionEnd(source, start) {
-  let trivia = skipJavascriptTrivia(source, start);
-  if (!trivia.complete || trivia.index >= source.length) return null;
-  let end;
-  if (["\"", "'"].includes(source[trivia.index])) {
-    end = javascriptStringEnd(source, trivia.index);
-  } else if (/[0-9]/u.test(source[trivia.index])) {
-    const number = /^(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|0[oO][0-7]+|(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?)[n]?/u.exec(
-      source.slice(trivia.index)
-    )?.[0];
-    end = number ? trivia.index + number.length : null;
-  } else if (["(", "[", "{"].includes(source[trivia.index])) {
-    const open = source[trivia.index];
-    end = balancedJavascriptEnd(
-      source,
-      trivia.index,
-      open,
-      open === "(" ? ")" : open === "[" ? "]" : "}"
-    );
-  } else {
-    const unary = readJavascriptIdentifier(source, trivia.index);
-    if (unary && ["await", "delete", "typeof", "void"].includes(unary.value)) {
-      return javascriptPrimaryExpressionEnd(source, unary.end);
-    }
-    if (["!", "~", "+", "-"].includes(source[trivia.index])) {
-      return javascriptPrimaryExpressionEnd(source, trivia.index + 1);
-    }
-    end = readJavascriptIdentifier(source, trivia.index)?.end ?? null;
-  }
-  if (end === null) return null;
-
-  while (true) {
-    trivia = skipJavascriptTrivia(source, end);
-    if (!trivia.complete || trivia.sawLineEnding) return end;
-    if (source.startsWith("?.", trivia.index)) {
-      const property = readJavascriptIdentifier(source, trivia.index + 2);
-      if (!property) return end;
-      end = property.end;
-      continue;
-    }
-    if (source[trivia.index] === ".") {
-      const property = readJavascriptIdentifier(source, trivia.index + 1);
-      if (!property) return end;
-      end = property.end;
-      continue;
-    }
-    if (source[trivia.index] === "(" || source[trivia.index] === "[") {
-      const open = source[trivia.index];
-      const postfixEnd = balancedJavascriptEnd(
-        source,
-        trivia.index,
-        open,
-        open === "(" ? ")" : "]"
-      );
-      if (postfixEnd === null) return null;
-      end = postfixEnd;
-      continue;
-    }
-    return end;
-  }
-}
-
-function javascriptExportExpressionEnd(source, start) {
-  let end = javascriptPrimaryExpressionEnd(source, start);
-  if (end === null) return null;
-  while (true) {
-    const trivia = skipJavascriptTrivia(source, end);
-    if (!trivia.complete || trivia.sawLineEnding) return end;
-    const operator = /^(?:===|!==|>>>|>>|<<|\*\*|&&|\|\||\?\?|==|!=|<=|>=|=>|[+*/%<>&|^=-])/u.exec(
-      source.slice(trivia.index)
-    )?.[0];
-    if (!operator) return end;
-    const right = javascriptPrimaryExpressionEnd(
-      source,
-      trivia.index + operator.length
-    );
-    if (right === null) return null;
-    end = right;
-  }
-}
-
-function variableExportAt(source, start, declaration) {
-  let cursor = start;
-  while (true) {
-    let trivia = skipJavascriptTrivia(source, cursor);
-    let bindingEnd;
-    if (source[trivia.index] === "{" || source[trivia.index] === "[") {
-      const open = source[trivia.index];
-      bindingEnd = balancedJavascriptEnd(
-        source,
-        trivia.index,
-        open,
-        open === "{" ? "}" : "]"
-      );
-    } else {
-      bindingEnd = readJavascriptIdentifier(source, trivia.index)?.end ?? null;
-    }
-    if (bindingEnd === null) return false;
-
-    trivia = skipJavascriptTrivia(source, bindingEnd);
-    if (source[trivia.index] === "=") {
-      const valueEnd = javascriptExportExpressionEnd(source, trivia.index + 1);
-      if (valueEnd === null) return false;
-      cursor = valueEnd;
-    } else {
-      if (declaration === "const") return false;
-      cursor = bindingEnd;
-    }
-
-    trivia = skipJavascriptTrivia(source, cursor);
-    if (source[trivia.index] !== ",") {
-      return javascriptStatementTailIsComplete(source, cursor);
-    }
-    cursor = trivia.index + 1;
-  }
-}
-
-function functionExportEnd(source, start, allowAnonymous) {
-  let trivia = skipJavascriptTrivia(source, start);
-  if (source[trivia.index] === "*") {
-    trivia = skipJavascriptTrivia(source, trivia.index + 1);
-  }
-  const name = readJavascriptIdentifier(source, trivia.index);
-  if (name) trivia = skipJavascriptTrivia(source, name.end);
-  if (!name && !allowAnonymous) return null;
-  const parametersEnd = balancedJavascriptEnd(source, trivia.index, "(", ")");
-  if (parametersEnd === null) return null;
-  trivia = skipJavascriptTrivia(source, parametersEnd);
-  return balancedJavascriptEnd(source, trivia.index, "{", "}");
-}
-
-function classExportEnd(source, start, allowAnonymous) {
-  let trivia = skipJavascriptTrivia(source, start);
-  const name = readJavascriptIdentifier(source, trivia.index);
-  if (name) trivia = skipJavascriptTrivia(source, name.end);
-  if (!name && !allowAnonymous) return null;
-
-  const extendsKeyword = readJavascriptIdentifier(source, trivia.index);
-  if (extendsKeyword?.value === "extends") {
-    const superclassEnd = javascriptExportExpressionEnd(
-      source,
-      extendsKeyword.end
-    );
-    if (superclassEnd === null) return null;
-    trivia = skipJavascriptTrivia(source, superclassEnd);
-  }
-  if (source[trivia.index] !== "{") return null;
-  return balancedJavascriptEnd(source, trivia.index, "{", "}");
-}
-
-function staticExportAt(source, offset) {
-  let trivia = skipJavascriptTrivia(source, offset + "export".length);
-  if (!trivia.complete) return false;
-
-  if (source[trivia.index] === "{") {
-    const end = balancedJavascriptEnd(source, trivia.index, "{", "}");
-    if (end === null) return false;
-    trivia = skipJavascriptTrivia(source, end);
-    const fromKeyword = readJavascriptIdentifier(source, trivia.index);
-    if (fromKeyword?.value === "from") {
-      return moduleSpecifierEnd(source, fromKeyword.end) !== null;
-    }
-    return javascriptStatementTailIsComplete(source, end);
-  }
-
-  if (source[trivia.index] === "*") {
-    trivia = skipJavascriptTrivia(source, trivia.index + 1);
-    const asKeyword = readJavascriptIdentifier(source, trivia.index);
-    if (asKeyword?.value === "as") {
-      trivia = skipJavascriptTrivia(source, asKeyword.end);
-      const name = readJavascriptIdentifier(source, trivia.index);
-      if (!name) return false;
-      trivia = skipJavascriptTrivia(source, name.end);
-    }
-    const fromKeyword = readJavascriptIdentifier(source, trivia.index);
-    return (
-      fromKeyword?.value === "from" &&
-      moduleSpecifierEnd(source, fromKeyword.end) !== null
-    );
-  }
-
-  const declaration = readJavascriptIdentifier(source, trivia.index);
-  if (!declaration) return false;
-  trivia = skipJavascriptTrivia(source, declaration.end);
-  if (["const", "let", "var"].includes(declaration.value)) {
-    return variableExportAt(source, declaration.end, declaration.value);
-  }
-  if (declaration.value === "function") {
-    const end = functionExportEnd(source, declaration.end, false);
-    return end !== null && javascriptStatementTailIsComplete(source, end);
-  }
-  if (declaration.value === "class") {
-    const end = classExportEnd(source, declaration.end, false);
-    return end !== null && javascriptStatementTailIsComplete(source, end);
-  }
-  if (declaration.value === "async") {
-    const functionKeyword = readJavascriptIdentifier(source, trivia.index);
-    if (functionKeyword?.value !== "function") return false;
-    const end = functionExportEnd(source, functionKeyword.end, false);
-    return end !== null && javascriptStatementTailIsComplete(source, end);
-  }
-  if (declaration.value !== "default") return false;
-  if (trivia.index >= source.length || source[trivia.index] === ";") return false;
-  const defaultKind = readJavascriptIdentifier(source, trivia.index);
-  if (defaultKind?.value === "function") {
-    const end = functionExportEnd(source, defaultKind.end, true);
-    return end !== null && javascriptStatementTailIsComplete(source, end);
-  }
-  if (defaultKind?.value === "class") {
-    const end = classExportEnd(source, defaultKind.end, true);
-    return end !== null && javascriptStatementTailIsComplete(source, end);
-  }
-  const expressionEnd = javascriptExportExpressionEnd(source, trivia.index);
-  return (
-    expressionEnd !== null &&
-    javascriptStatementTailIsComplete(source, expressionEnd)
-  );
-}
-
-function skipJsxWhitespace(source, start) {
-  let index = start;
-  let lineEndings = 0;
-  while (/\s/u.test(source[index] || "")) {
-    if (source[index] === "\r") {
-      lineEndings += 1;
-      if (source[index + 1] === "\n") index += 1;
-    } else if (source[index] === "\n") {
-      lineEndings += 1;
-    }
-    if (lineEndings > 1) return null;
-    index += 1;
-  }
-  return { index, lineEndings };
-}
-
-function parseJsxTagTail(source, start) {
-  let cursor = start;
-  let hasExplicitAttributes = false;
-  while (cursor < source.length) {
-    const whitespace = skipJsxWhitespace(source, cursor);
-    if (!whitespace) return null;
-    cursor = whitespace.index;
-    if (source[cursor] === ">") {
-      return { end: cursor, selfClosing: false, hasExplicitAttributes };
-    }
-    if (source[cursor] === "/") {
-      const afterSlash = skipJsxWhitespace(source, cursor + 1);
-      if (!afterSlash || source[afterSlash.index] !== ">") return null;
-      return {
-        end: afterSlash.index,
-        selfClosing: true,
-        hasExplicitAttributes
-      };
-    }
-    if (source[cursor] === "{") {
-      const expressionEnd = balancedJavascriptEnd(source, cursor, "{", "}");
-      if (expressionEnd === null) return null;
-      hasExplicitAttributes = true;
-      cursor = expressionEnd;
-      continue;
-    }
-
-    const attribute = jsxNamePattern.exec(source.slice(cursor))?.[0];
-    if (!attribute) return null;
-    cursor += attribute.length;
-    const afterName = skipJsxWhitespace(source, cursor);
-    if (!afterName) return null;
-    cursor = afterName.index;
-    if (source[cursor] !== "=") continue;
-
-    hasExplicitAttributes = true;
-    const beforeValue = skipJsxWhitespace(source, cursor + 1);
-    if (!beforeValue) return null;
-    cursor = beforeValue.index;
-    if (["\"", "'"].includes(source[cursor])) {
-      const valueEnd = javascriptStringEnd(source, cursor);
-      if (valueEnd === null) return null;
-      cursor = valueEnd;
-    } else if (source[cursor] === "{") {
-      const valueEnd = balancedJavascriptEnd(source, cursor, "{", "}");
-      if (valueEnd === null) return null;
-      cursor = valueEnd;
-    } else {
-      const value = /^[^\s"'=<>`]+/u.exec(source.slice(cursor))?.[0];
-      if (!value) return null;
-      cursor += value.length;
-    }
-  }
-  return null;
-}
-
-function isChainedComparison(source, tagStart, tagEnd) {
-  let leftIndex = tagStart - 1;
-  while (source[leftIndex] === " " || source[leftIndex] === "\t") leftIndex -= 1;
-  let leftStart = leftIndex;
-  if (
-    leftIndex > 0 &&
-    /[\uDC00-\uDFFF]/u.test(source[leftIndex]) &&
-    /[\uD800-\uDBFF]/u.test(source[leftIndex - 1])
-  ) {
-    leftStart -= 1;
-  }
-  let rightIndex = tagEnd + 1;
-  while (source[rightIndex] === " " || source[rightIndex] === "\t") rightIndex += 1;
-  if (source[rightIndex] === "=") {
-    rightIndex += 1;
-    while (source[rightIndex] === " " || source[rightIndex] === "\t") {
-      rightIndex += 1;
-    }
-  }
-  if (source[rightIndex] === "+" || source[rightIndex] === "-") {
-    rightIndex += 1;
-    while (source[rightIndex] === " " || source[rightIndex] === "\t") {
-      rightIndex += 1;
-    }
-  }
-  const left = source.slice(leftStart, leftIndex + 1);
-  const rightCodePoint = source.codePointAt(rightIndex);
-  const right =
-    rightCodePoint === undefined ? "" : String.fromCodePoint(rightCodePoint);
-  return (
-    /^[$_\u200C\u200D\p{ID_Continue})\]]$/u.test(left) &&
-    /^[$_\p{ID_Start}\p{N}(\[]$/u.test(right)
-  );
-}
-
-function sourceLineStarts(source) {
-  const starts = [0];
-  for (let index = 0; index < source.length; index += 1) {
-    if (source[index] === "\n") starts.push(index + 1);
-  }
-  return starts;
-}
-
-function sourceLineAtOffset(lineStarts, offset, bodyStartLine) {
-  let low = 0;
-  let high = lineStarts.length;
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    if (lineStarts[middle] <= offset) low = middle + 1;
-    else high = middle;
-  }
-  return bodyStartLine + low - 1;
-}
-
-function maskNonScannableRanges(ast, body) {
-  const masked = body.split("");
-
-  function visit(node) {
-    if (["code", "inlineCode", "html"].includes(node.type) && node.position) {
-      const start = node.position.start.offset ?? 0;
-      const end = node.position.end.offset ?? start;
-      for (let index = start; index < end; index += 1) {
-        if (masked[index] !== "\n") masked[index] = " ";
-      }
-      return;
-    }
-    for (const child of node.children || []) visit(child);
-  }
-
-  visit(ast);
-  return masked.join("");
-}
-
-function addExcludedSyntaxIssue(
-  problems,
-  file,
-  lineStarts,
-  bodyStartLine,
-  offset,
-  rule,
-  message,
-  correction
-) {
-  problems.push(
-    issue(
-      file,
-      sourceLineAtOffset(lineStarts, offset, bodyStartLine),
-      rule,
-      message,
-      correction
+function createIssueCollector(problems, limit = CMS_MARKDOWN_LIMITS.maxDiagnostics) {
+  const seen = new Set(
+    problems.map(
+      (problem) =>
+        `${problem.file}\0${problem.line}\0${problem.rule}\0${problem.message}`
     )
   );
+
+  return {
+    add(problem) {
+      if (problems.length >= limit) return false;
+      const key = `${problem.file}\0${problem.line}\0${problem.rule}\0${problem.message}`;
+      if (seen.has(key)) return true;
+      seen.add(key);
+      problems.push(problem);
+      return problems.length < limit;
+    },
+    addAll(additions) {
+      for (const problem of additions) {
+        if (!this.add(problem)) break;
+      }
+    },
+    get full() {
+      return problems.length >= limit;
+    }
+  };
 }
 
-function scanExcludedSyntax(ast, body, file, bodyStartLine, problems) {
-  const source = maskNonScannableRanges(ast, body);
-  const lineStarts = sourceLineStarts(source);
+function countLineEndings(value) {
+  let count = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "\n") count += 1;
+  }
+  return count;
+}
 
-  const containerPattern = /:::/g;
-  let match;
-  while ((match = containerPattern.exec(source))) {
-    const offset = match.index;
-    const escapes = precedingBackslashes(source, offset);
-    const lineStart = source.lastIndexOf("\n", escapes.start - 1) + 1;
-    if (
-      escapes.count % 2 === 0 &&
-      isMarkdownBlockPrefix(source.slice(lineStart, escapes.start))
-    ) {
-      addExcludedSyntaxIssue(
-        problems,
-        file,
-        lineStarts,
-        bodyStartLine,
-        offset,
-        "markdown/custom-container",
-        "Custom ::: containers are not allowed.",
-        "Use an ordinary heading, paragraph, list, blockquote, or fenced code block."
-      );
+function htmlIssue(file, line) {
+  return issue(
+    file,
+    line,
+    "markdown/html",
+    "HTML, comments, declarations, and component-like raw tags are not allowed in CMS Markdown.",
+    "Use editor-native Markdown and move code-owned structure into an Astro component."
+  );
+}
+
+function editorNativeIssue(file, line, tokenType) {
+  return issue(
+    file,
+    line,
+    "markdown/editor-native",
+    `Marked token type ${JSON.stringify(tokenType)} is outside the approved editor-native Markdown subset.`,
+    "Use headings, paragraphs, emphasis, links/images, lists, blockquotes, thematic breaks, code, or hard breaks."
+  );
+}
+
+function markedTokenChildren(token) {
+  const children = [];
+  if (Array.isArray(token.tokens)) children.push(...token.tokens);
+  if (Array.isArray(token.items)) children.push(...token.items);
+  return children;
+}
+
+function inspectMarkedToken(token, file, line, collector, rendererFoundHtml) {
+  if (!token || typeof token !== "object" || typeof token.type !== "string") {
+    collector.add(editorNativeIssue(file, line, "<invalid>"));
+    return;
+  }
+
+  if (token.type === "html") {
+    if (!rendererFoundHtml) collector.add(htmlIssue(file, line));
+    return;
+  }
+
+  if (!ALLOWED_MARKED_TOKEN_TYPES.has(token.type)) {
+    collector.add(editorNativeIssue(file, line, token.type));
+    return;
+  }
+
+  if (token.task === true) {
+    collector.add(editorNativeIssue(file, line, "task-list"));
+  }
+
+  if (token.type === "link" && typeof token.href === "string") {
+    const reason = validateLinkDestination(token.href);
+    if (reason) {
+      collector.add(destinationIssue(file, line, "link", token.href, reason));
+    }
+  } else if (token.type === "image" && typeof token.href === "string") {
+    const reason = validateImageDestination(token.href);
+    if (reason) {
+      collector.add(destinationIssue(file, line, "image", token.href, reason));
     }
   }
 
-  const directivePattern =
-    /:{1,2}[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?(?![A-Za-z0-9_-]|:)/g;
-  while ((match = directivePattern.exec(source))) {
-    const offset = match.index;
-    const escapes = precedingBackslashes(source, offset);
-    const before = escapes.start === 0 ? "" : source[escapes.start - 1];
-    const hasPhrasingBoundary =
-      before === "" || !/[:$_\u200C\u200D\p{ID_Continue}-]/u.test(before);
-    const next = source[offset + match[0].length];
-    const hasExplicitPayload = before !== ":" && (next === "[" || next === "{");
-    if (
-      escapes.count % 2 === 0 &&
-      (hasPhrasingBoundary || hasExplicitPayload)
-    ) {
-      addExcludedSyntaxIssue(
-        problems,
-        file,
-        lineStarts,
-        bodyStartLine,
-        offset,
-        "markdown/directive",
-        "Markdown directives are not allowed.",
-        "Use ordinary Markdown, or escape the leading colon when it is literal text."
-      );
-    }
-  }
-
-  const esmPattern =
-    /(^|\n)[ \t]{0,3}(import|export)(?![$_\u200C\u200D\p{ID_Continue}-])/gu;
-  while ((match = esmPattern.exec(source))) {
-    const offset = match.index + match[0].lastIndexOf(match[2]);
-    const isStaticStatement =
-      match[2] === "import"
-        ? staticImportAt(source, offset)
-        : staticExportAt(source, offset);
-    if (!isStaticStatement) continue;
-    addExcludedSyntaxIssue(
-      problems,
-      file,
-      lineStarts,
-      bodyStartLine,
-      offset,
-      "markdown/mdx-esm",
-      "MDX import/export syntax is not allowed.",
-      "Remove executable module syntax or put a non-executed example in code."
-    );
-  }
-
-  for (let offset = 0; offset < source.length; offset += 1) {
-    if (source[offset] !== "{" || isEscaped(source, offset)) continue;
-    let depth = 1;
-    let end = offset + 1;
-    for (; end < source.length && depth > 0; end += 1) {
-      if (isEscaped(source, end)) continue;
-      if (source[end] === "{") depth += 1;
-      else if (source[end] === "}") depth -= 1;
-    }
-    if (depth === 0) {
-      addExcludedSyntaxIssue(
-        problems,
-        file,
-        lineStarts,
-        bodyStartLine,
-        offset,
-        "markdown/expression",
-        "Executable expression syntax is not allowed.",
-        "Remove the expression, escape literal braces, or put a non-executed example in code."
-      );
-      offset = end - 1;
-    }
-  }
-
-  for (let offset = 0; offset < source.length; offset += 1) {
-    if (source[offset] !== "<" || isEscaped(source, offset)) continue;
-    let whitespace = skipJsxWhitespace(source, offset + 1);
-    if (!whitespace) continue;
-    let nameStart = whitespace.index;
-    let closing = false;
-    if (source[nameStart] === "/") {
-      closing = true;
-      whitespace = skipJsxWhitespace(source, nameStart + 1);
-      if (!whitespace) continue;
-      nameStart = whitespace.index;
-    }
-    if (source[nameStart] === ">") {
-      addExcludedSyntaxIssue(
-        problems,
-        file,
-        lineStarts,
-        bodyStartLine,
-        offset,
-        "markdown/jsx",
-        "JSX/Astro component syntax is not allowed.",
-        "Remove the component markup or put a non-executed example in code."
-      );
-      continue;
-    }
-
-    const remainder = source.slice(nameStart);
-    const name = jsxNamePattern.exec(remainder)?.[0];
-    if (!name) continue;
-    const boundary = remainder[name.length];
-    if (!/[\s/>]/u.test(boundary || "")) continue;
-    const tag = parseJsxTagTail(source, nameStart + name.length);
-    if (!tag) continue;
-    const hasStrongTagSignal =
-      closing ||
-      tag.selfClosing ||
-      tag.hasExplicitAttributes ||
-      name.includes(".") ||
-      name.includes(":") ||
-      ["embed", "iframe", "object", "script", "style"].includes(name);
-    if (
-      hasStrongTagSignal ||
-      !isChainedComparison(source, offset, tag.end)
-    ) {
-      addExcludedSyntaxIssue(
-        problems,
-        file,
-        lineStarts,
-        bodyStartLine,
-        offset,
-        "markdown/jsx",
-        "JSX/Astro component syntax is not allowed.",
-        "Remove the component markup or put a non-executed example in code."
-      );
-      offset = tag.end;
-    }
+  for (const child of markedTokenChildren(token)) {
+    if (collector.full) break;
+    inspectMarkedToken(child, file, line, collector, rendererFoundHtml);
   }
 }
 
-function inspectMarkdown(ast, body, file, bodyStartLine, problems) {
+function inspectMarkedMarkdown(
+  tokens,
+  file,
+  bodyStartLine,
+  collector,
+  rendererFoundHtml
+) {
+  let line = bodyStartLine;
+  for (const token of tokens) {
+    if (collector.full) break;
+    inspectMarkedToken(token, file, line, collector, rendererFoundHtml);
+    line += countLineEndings(typeof token.raw === "string" ? token.raw : "");
+  }
+}
+
+function inspectMarkdown(ast, file, bodyStartLine, collector) {
   const definitions = new Map();
+  let foundHtml = false;
 
   function collect(node) {
+    if (collector.full) return;
     if (node.type === "definition") {
       const identifier = node.identifier.toLowerCase();
       if (definitions.has(identifier)) {
-        problems.push(
+        collector.add(
           issue(
             file,
             sourceLine(node, bodyStartLine),
@@ -1338,7 +800,7 @@ function inspectMarkdown(ast, body, file, bodyStartLine, problems) {
       }
       const reason = validateLinkDestination(node.url);
       if (reason) {
-        problems.push(
+        collector.add(
           destinationIssue(
             file,
             sourceLine(node, bodyStartLine),
@@ -1354,32 +816,28 @@ function inspectMarkdown(ast, body, file, bodyStartLine, problems) {
   collect(ast);
 
   function visit(node) {
+    if (collector.full) return;
     const line = sourceLine(node, bodyStartLine);
 
     if (node.type === "html") {
-      problems.push(
-        issue(
-          file,
-          line,
-          "markdown/html",
-          "HTML, comments, and declarations are not allowed in CMS Markdown.",
-          "Use safe Markdown and move code-owned structure into an Astro component."
-        )
-      );
+      foundHtml = true;
+      collector.add(htmlIssue(file, line));
+    } else if (!ALLOWED_MDAST_NODE_TYPES.has(node.type)) {
+      collector.add(editorNativeIssue(file, line, `mdast:${node.type}`));
     } else if (node.type === "link") {
       const reason = validateLinkDestination(node.url);
       if (reason) {
-        problems.push(destinationIssue(file, line, "link", node.url, reason));
+        collector.add(destinationIssue(file, line, "link", node.url, reason));
       }
     } else if (node.type === "image") {
       const reason = validateImageDestination(node.url);
       if (reason) {
-        problems.push(destinationIssue(file, line, "image", node.url, reason));
+        collector.add(destinationIssue(file, line, "image", node.url, reason));
       }
     } else if (node.type === "linkReference" || node.type === "imageReference") {
       const definition = definitions.get(node.identifier.toLowerCase());
       if (!definition) {
-        problems.push(
+        collector.add(
           issue(
             file,
             line,
@@ -1395,7 +853,7 @@ function inspectMarkdown(ast, body, file, bodyStartLine, problems) {
             ? validateImageDestination(definition.url)
             : validateLinkDestination(definition.url);
         if (reason) {
-          problems.push(
+          collector.add(
             destinationIssue(file, line, kind, definition.url, reason)
           );
         }
@@ -1405,16 +863,31 @@ function inspectMarkdown(ast, body, file, bodyStartLine, problems) {
     for (const child of node.children || []) visit(child);
   }
   visit(ast);
-  scanExcludedSyntax(ast, body, file, bodyStartLine, problems);
+  return { foundHtml };
 }
 
 export function validateMarkdownSource(source, file = "<markdown>") {
   const problems = [];
+  const collector = createIssueCollector(problems);
+  const byteLength = Buffer.byteLength(source, "utf8");
+  if (byteLength > CMS_MARKDOWN_LIMITS.maxBytes) {
+    collector.add(
+      issue(
+        file,
+        1,
+        "markdown/file-size",
+        `Markdown file is ${byteLength} bytes; the CMS limit is ${CMS_MARKDOWN_LIMITS.maxBytes} bytes.`,
+        "Split or shorten the content before editing it through Pages CMS."
+      )
+    );
+    return { issues: problems, frontmatter: undefined, body: "" };
+  }
+
   const normalized = source.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const lines = normalized.split("\n");
 
   if (lines[0] !== "---") {
-    problems.push(
+    collector.add(
       issue(
         file,
         1,
@@ -1428,7 +901,7 @@ export function validateMarkdownSource(source, file = "<markdown>") {
 
   const closingIndex = lines.findIndex((line, index) => index > 0 && line === "---");
   if (closingIndex < 0) {
-    problems.push(
+    collector.add(
       issue(
         file,
         1,
@@ -1448,21 +921,52 @@ export function validateMarkdownSource(source, file = "<markdown>") {
     baseLine: 2,
     requireMapping: true
   });
-  problems.push(...parsed.issues);
+  collector.addAll(parsed.issues);
 
-  try {
-    const ast = fromMarkdown(body);
-    inspectMarkdown(ast, body, file, bodyStartLine, problems);
-  } catch (error) {
-    problems.push(
-      issue(
+  let rendererFoundHtml = false;
+  if (!collector.full) {
+    try {
+      const ast = fromMarkdown(body);
+      rendererFoundHtml = inspectMarkdown(
+        ast,
         file,
         bodyStartLine,
-        "markdown/parse",
-        error instanceof Error ? error.message : String(error),
-        "Fix the Markdown so it parses as CommonMark."
-      )
-    );
+        collector
+      ).foundHtml;
+    } catch (error) {
+      collector.add(
+        issue(
+          file,
+          bodyStartLine,
+          "markdown/renderer-parse",
+          error instanceof Error ? error.message : String(error),
+          "Fix the Markdown so it parses as CommonMark."
+        )
+      );
+    }
+  }
+
+  if (!collector.full) {
+    try {
+      const tokens = marked.lexer(body, { async: false, gfm: true });
+      inspectMarkedMarkdown(
+        tokens,
+        file,
+        bodyStartLine,
+        collector,
+        rendererFoundHtml
+      );
+    } catch (error) {
+      collector.add(
+        issue(
+          file,
+          bodyStartLine,
+          "markdown/editor-parse",
+          error instanceof Error ? error.message : String(error),
+          "Fix the Markdown so Pages CMS can tokenize it safely."
+        )
+      );
+    }
   }
 
   return {
@@ -1492,7 +996,7 @@ function toRepositoryPath(root, path) {
   return relative(root, path).split("\\").join("/");
 }
 
-function validateFixedPages(results) {
+function validateFixedPages(results, collector) {
   const pagePrefix = "src/content/pages/";
   const actual = new Map(
     [...results.entries()].filter(([path]) => path.startsWith(pagePrefix))
@@ -1502,7 +1006,7 @@ function validateFixedPages(results) {
     const path = `${pagePrefix}${filename}`;
     const result = actual.get(path);
     if (!result) {
-      results.issues.push(
+      collector.add(
         issue(
           path,
           1,
@@ -1514,7 +1018,7 @@ function validateFixedPages(results) {
       continue;
     }
     if (result.frontmatter?.route !== route) {
-      results.issues.push(
+      collector.add(
         issue(
           path,
           2,
@@ -1529,7 +1033,7 @@ function validateFixedPages(results) {
   for (const path of actual.keys()) {
     const filename = path.slice(pagePrefix.length);
     if (!FIXED_PAGES.has(filename)) {
-      results.issues.push(
+      collector.add(
         issue(
           path,
           1,
@@ -1546,7 +1050,7 @@ function validateFixedPages(results) {
     const route = result.frontmatter?.route;
     if (typeof route !== "string") continue;
     if (routes.has(route)) {
-      results.issues.push(
+      collector.add(
         issue(
           path,
           2,
@@ -1564,16 +1068,17 @@ function validateFixedPages(results) {
 export function checkRepository(root = process.cwd()) {
   const repositoryRoot = resolve(root);
   const problems = [];
+  const collector = createIssueCollector(problems);
   const results = new Map();
   results.issues = problems;
 
   const configPath = resolve(repositoryRoot, ".pages.yml");
   try {
-    problems.push(
-      ...validatePagesConfigSource(readFileSync(configPath, "utf8"), ".pages.yml")
+    collector.addAll(
+      validatePagesConfigSource(readFileSync(configPath, "utf8"), ".pages.yml")
     );
   } catch (error) {
-    problems.push(
+    collector.add(
       issue(
         ".pages.yml",
         1,
@@ -1585,12 +1090,13 @@ export function checkRepository(root = process.cwd()) {
   }
 
   for (const contentRoot of CONTENT_ROOTS) {
+    if (collector.full) break;
     const absoluteRoot = resolve(repositoryRoot, contentRoot);
     let files;
     try {
       files = markdownFiles(absoluteRoot);
     } catch (error) {
-      problems.push(
+      collector.add(
         issue(
           contentRoot,
           1,
@@ -1603,6 +1109,7 @@ export function checkRepository(root = process.cwd()) {
     }
 
     for (const path of files) {
+      if (collector.full) break;
       const repositoryPath = toRepositoryPath(repositoryRoot, path);
       let result;
       try {
@@ -1611,7 +1118,7 @@ export function checkRepository(root = process.cwd()) {
           repositoryPath
         );
       } catch (error) {
-        problems.push(
+        collector.add(
           issue(
             repositoryPath,
             1,
@@ -1623,11 +1130,11 @@ export function checkRepository(root = process.cwd()) {
         continue;
       }
       results.set(repositoryPath, result);
-      problems.push(...result.issues);
+      collector.addAll(result.issues);
     }
   }
 
-  validateFixedPages(results);
+  validateFixedPages(results, collector);
   return problems;
 }
 

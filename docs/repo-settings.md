@@ -23,6 +23,7 @@ After an authorized rollout succeeds, an active repository ruleset targeting
 
 - require a pull request before merging;
 - require one eligible approval;
+- dismiss stale approvals when new commits are pushed;
 - require every review conversation to be resolved;
 - require the branch to be up to date before merging;
 - require both verified checks by exact name, app, and integration ID:
@@ -34,7 +35,8 @@ After an authorized rollout succeeds, an active repository ruleset targeting
   or `exempt`.
 
 The PR-only administrator bypass is an explicit, commented, audited exception
-after checks, full-diff review, and preview review. It never authorizes a direct
+after checks, full-diff review, and preview review. Record the GitHub bypass
+reason so it remains visible in the audit trail. It never authorizes a direct
 push to `main`. A bot-authored CMS PR can normally receive an administrator's
 eligible approval; an owner-authored PR cannot be self-approved.
 
@@ -62,6 +64,13 @@ the CMS freeze in effect, and stop.
 - Enable **Allow GitHub Actions to create and approve pull requests** only in
   the separately authorized rollout, after recording its original value.
 - Prefer pinned third-party actions or trusted first-party actions.
+- The Pages CMS **Open review PR** action must dispatch `cms-review.yml` at
+  `ref: main`. That workflow accepts only the bounded `payload` JSON input,
+  checks out trusted `main`, validates a same-repository `cms/**` branch and
+  exact current head, and never checks out or executes CMS-head code with its
+  pull-request token.
+- Ordinary `cms/**` push and PR CI remains read-only and runs the shared deploy
+  verification before Playwright.
 - Do not use GitHub Actions as a production deployer while Cloudflare Workers
   Builds is configured as the deploy path.
 
@@ -89,3 +98,11 @@ Configure Cloudflare Workers Builds as the single production deploy path:
 
 Do not also add a GitHub Actions production deploy unless Workers Builds is
 disabled or the deploy ownership is intentionally changed.
+
+`pnpm build` and `pnpm verify:deploy` share the same upload, bounded CMS
+content/configuration, Astro, static-build, and parse5 built-map assertions.
+Cloudflare therefore fails before upload if the code-owned map invariant is
+missing or altered.
+
+Repeat the separately authorized disposable, unmerged Pages CMS canary before
+adopting a new Pages CMS release or changing any rich-text capability.

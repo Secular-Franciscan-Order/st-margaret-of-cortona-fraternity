@@ -47,11 +47,11 @@ jobs:
       - name: Test CMS safeguards
         run: pnpm test:cms
 
-      - name: Check
-        run: pnpm check
+      - name: Test built-output safeguards
+        run: pnpm test:built-site
 
-      - name: Build
-        run: pnpm build
+      - name: Run shared deployment verification
+        run: pnpm verify:deploy
 
       - name: Test Worker
         run: pnpm test:worker

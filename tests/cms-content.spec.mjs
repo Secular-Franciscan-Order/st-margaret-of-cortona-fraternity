@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 
 import {
+  CMS_MARKDOWN_LIMITS,
   checkRepository,
   formatIssue,
   parseStrictYaml,
@@ -87,12 +89,60 @@ test("rejects every unapproved Pages CMS capability mutation", () => {
     [
       "component rich text",
       currentConfig.replace(
-        "format: markdown\n          media: images",
-        "format: markdown\n          components: [LocationMap]\n          media: images"
+        "format: markdown\n          switcher: false\n          media: images",
+        "format: markdown\n          switcher: false\n          components: [LocationMap]\n          media: images"
+      )
+    ],
+    [
+      "missing rich-text switcher lock",
+      currentConfig.replace("          switcher: false\n", "")
+    ],
+    [
+      "enabled rich-text source switcher",
+      currentConfig.replace("switcher: false", "switcher: true")
+    ],
+    [
+      "changed review action workflow",
+      currentConfig.replace("workflow: cms-review.yml", "workflow: unsafe.yml")
+    ],
+    [
+      "changed review action identity",
+      currentConfig.replace("name: open-review-pr", "name: publish-now")
+    ],
+    [
+      "changed review action label",
+      currentConfig.replace("label: Open review PR", "label: Publish")
+    ],
+    [
+      "changed review action ref",
+      currentConfig.replace("ref: main", "ref: current")
+    ],
+    [
+      "changed review action confirmation",
+      currentConfig.replace(
+        "This change is not published. It still requires checks, preview, approval, and human merge.",
+        "Publish now."
+      )
+    ],
+    [
+      "removed review action confirmation",
+      currentConfig.replace(
+        /    confirm:\n      title: Open review PR\?\n      message: .*\n      button: Open review PR\n/,
+        "    confirm: false\n"
+      )
+    ],
+    [
+      "added review action",
+      currentConfig.replace(
+        "\nmedia:\n",
+        "\n  - name: extra-action\n    label: Extra action\n    workflow: unsafe.yml\n    ref: main\n\nmedia:\n"
       )
     ],
     ["HTML rich text", currentConfig.replace("format: markdown", "format: html")],
-    ["missing settings root", currentConfig.replace(/^settings:[\s\S]*?\nmedia:/, "media:")],
+    [
+      "missing settings root",
+      currentConfig.replace(/^settings:[\s\S]*?\nactions:/, "actions:")
+    ],
     ["extra root", `${currentConfig}\nplugins: [dangerous]\n`],
     ["display-like extra root", `${currentConfig}\nlabel: Unsafe extra root\n`],
     [
@@ -164,13 +214,14 @@ test("requires exact frontmatter delimiters and strict mappings", () => {
   }
 });
 
-test("accepts the documented safe Markdown subset", () => {
+test("accepts the documented editor-native Markdown subset", () => {
   const body = [
     "# Heading",
     "",
     "Paragraph with *emphasis*, **strong text**, escaped punctuation \\{like this\\},",
     "an [HTTP link](https://example.com/path?q=one), a [mail link](mailto:editor@example.com),",
-    "a [relative link](../news), a [root link](/faq), and a [fragment](#heading).",
+    "a [relative link](../news), a [root link](/faq), and a [fragment](#heading).  ",
+    "This follows a hard break.",
     "",
     "![Approved image](/uploads/images/photo-1.webp)",
     "",
@@ -183,179 +234,120 @@ test("accepts the documented safe Markdown subset", () => {
     "",
     "Visit <https://example.com> or <editor@example.com>.",
     "",
-    "Inline code: `<Component value={unsafe} />`",
+    "Inline code: `<Badge>unsafe</Badge>`",
     "",
-    "```astro",
-    "<Component value={unsafe} />",
-    ":::not-a-container-inside-code",
+    "```html",
+    "<iframe src=\"unsafe\"></iframe>",
     "```",
     "",
-    "An ordinary comparison: 1 < 2 and 3 > 1.",
-    "Escaped examples: \\<Component /> and \\:note[example]."
+    "An ordinary comparison: Alpha < Beta > Gamma and α < β > γ.",
+    "Normal prose may say import, export, :note[example], :::warning, or {example}.",
+    "Escaped raw-tag example: \\<Badge>example\\</Badge>."
   ].join("\n");
 
   assert.deepEqual(validateMarkdownSource(markdown(body), "safe.md").issues, []);
 });
 
-test("rejects HTML, MDX, JSX/Astro, expressions, directives, and containers", () => {
+test("rejects raw HTML in both maintained Markdown parsers", () => {
   const fixtures = [
-    ["<section>unsafe</section>", "markdown/html"],
-    ["<script>alert(1)</script>", "markdown/html"],
-    ["<!-- comment -->", "markdown/html"],
-    ["<!doctype html>", "markdown/html"],
-    ["<Component client:load />", "markdown/html"],
-    ["<>fragment</>", "markdown/jsx"],
-    ["import Map from './Map.astro'", "markdown/mdx-esm"],
-    ["import './setup.js'", "markdown/mdx-esm"],
-    ["import * as icons from './icons.js'", "markdown/mdx-esm"],
-    ["import Map, { Marker } from './Map.astro'", "markdown/mdx-esm"],
-    ["import data from './data.json' with { type: 'json' }", "markdown/mdx-esm"],
-    ["import {\n  Map\n} from './Map.astro'", "markdown/mdx-esm"],
-    ["import/* cms */{Map}from './Map.astro'", "markdown/mdx-esm"],
-    ["export const value = true", "markdown/mdx-esm"],
-    ["export let value", "markdown/mdx-esm"],
-    ["export function value() {}", "markdown/mdx-esm"],
-    ["export class Value {}", "markdown/mdx-esm"],
-    ["export class Value\n{}", "markdown/mdx-esm"],
-    ["export async function value() {}", "markdown/mdx-esm"],
-    ["export/**/default 1", "markdown/mdx-esm"],
-    ["export default function() {}", "markdown/mdx-esm"],
-    ["export { value }", "markdown/mdx-esm"],
-    ["export { value as default } from './value.js'", "markdown/mdx-esm"],
-    ["export*from './all.js'", "markdown/mdx-esm"],
-    ["import{Map}from './Map.astro'", "markdown/mdx-esm"],
-    ["Render {items.map(renderItem)} here.", "markdown/expression"],
-    ["Render { foo +\nbar } here.", "markdown/expression"],
-    ["Render {} here.", "markdown/expression"],
-    ["<foo.Bar />", "markdown/jsx"],
-    ["<foo:Bar />", "markdown/jsx"],
-    ["<foo.Bar\n  prop=\"value\" />", "markdown/jsx"],
-    ["<\nComponent>unsafe</\nComponent>", "markdown/jsx"],
-    [`${"\\"}<Component>unsafe</\nComponent>`, "markdown/jsx"],
-    ["<\nscript>alert(1)</\nscript>", "markdown/jsx"],
-    ["</\nsection>", "markdown/jsx"],
-    ["<\nsection class=\"unsafe\">", "markdown/jsx"],
-    ["<Δ />", "markdown/jsx"],
-    ["<δ.Μέλος />", "markdown/jsx"],
-    ["<δ:Μέλος />", "markdown/jsx"],
-    [":note[unsafe]", "markdown/directive"],
-    ["(:note[unsafe])", "markdown/directive"],
-    ["Text:note[unsafe]", "markdown/directive"],
-    ["(:note)", "markdown/directive"],
-    ["Text —:note[unsafe]", "markdown/directive"],
-    ["::warning unsafe", "markdown/directive"],
-    [":::warning\nunsafe\n:::", "markdown/custom-container"],
-    ["> :::warning\n> unsafe\n> :::", "markdown/custom-container"],
-    ["- :::warning\n  unsafe\n  :::", "markdown/custom-container"],
-    ["> 1. :::warning\n>    unsafe\n>    :::", "markdown/custom-container"]
+    "<section>unsafe</section>",
+    "<iframe src=\"https://example.com\"></iframe>",
+    "<details><summary>Unsafe</summary>Body</details>",
+    "Text <Badge>unsafe</Badge>",
+    "<!-- comment -->",
+    "<!doctype html>"
   ];
 
-  for (const [body, rule] of fixtures) {
-    assertFailsWith(validateMarkdownSource(markdown(body), "unsafe.md").issues, rule);
+  for (const body of fixtures) {
+    assertFailsWith(
+      validateMarkdownSource(markdown(body), "unsafe-html.md").issues,
+      "markdown/html"
+    );
+  }
+
+  const positioned = validateMarkdownSource(
+    markdown("First line\nSecond <Badge>unsafe</Badge>"),
+    "positioned.md"
+  ).issues;
+  assert.equal(positioned.length, 1);
+  assert.equal(positioned[0].line, 5);
+});
+
+test("rejects Marked features outside the approved editor-native subset", () => {
+  const fixtures = [
+    "~~strikethrough~~",
+    "| A | B |\n| - | - |\n| 1 | 2 |",
+    "- [x] task item"
+  ];
+
+  for (const body of fixtures) {
+    assertFailsWith(
+      validateMarkdownSource(markdown(body), "unsupported.md").issues,
+      "markdown/editor-native"
+    );
   }
 });
 
-test("uses odd/even backslash parity and ignores complete code ranges", () => {
-  const oddEscapes = [
-    `Literal ${"\\"}{ foo +\nbar }`,
-    `Literal ${"\\"}<foo.Bar />`,
-    `Literal ${"\\"}<foo:Bar />`,
-    `${"\\"}<\nComponent>literal${"\\"}</\nComponent>`,
-    `Literal ${"\\"}<Δ />`,
-    `Literal ${"\\"}<δ.Μέλος /> and ${"\\"}<δ:Μέλος />`,
-    `Literal ${"\\"}:note[example]`,
-    `Literal (${"\\"}:note[example])`,
-    `Literal text${"\\"}:note[example]`,
-    `${"\\"}:::literal container marker`,
-    `> ${"\\"}:::literal container marker`,
-    `- ${"\\"}:::literal container marker`,
-    "exported values are prose",
-    "export-ready values are prose",
-    "exportdefault1 is one prose word",
-    "importantly, this is prose",
-    "import food from the pantry when needed",
-    "import food from './market.js' when needed",
-    "import spices and herbs from the cupboard when needed",
-    "import food from the pantry when needed\n\nLater, use './market.js'.",
-    "export goods support the economy",
-    "export quality matters to everyone",
-    "export function supports the economy",
+test("treats JavaScript-like delimiters and import/export wording as prose", () => {
+  const safeBodies = [
+    "Render {items.map(renderItem)} here.",
+    "Render { foo +\nbar } here.",
+    ":note[ordinary text]",
+    ":::warning\nordinary text\n:::",
+    "import Map from './Map.astro'",
+    "export default function() {}",
     "export class goods improve trade",
-    "export const value matters in this sentence",
-    "export default",
-    "export default settings are preferred.",
-    "export default: use the standard settings.",
-    `export class goods improve trade\n\nLater, ${"\\"}{example${"\\"}}.`,
-    `export default settings are preferred.\n\nLater, ${"\\"}{example${"\\"}}.`,
-    `export goods support the economy.\n\nLater, ${"\\"}{example${"\\"}}.`,
-    "We export/**/default wording as prose.",
-    "Alpha < Beta",
-    "α < β",
     "Alpha < Beta > Gamma",
-    "α < β > γ",
-    "Alpha < Beta >= Gamma",
     "α < β >= -γ",
     "Alpha < Beta\n\nLater, 3 > 1.",
-    "α < β\n\nΑργότερα, 3 > 1.",
-    "Alpha < Component without a tag close",
-    "<\nscript without a tag terminator",
-    "</\nsection without a tag terminator",
-    "<Δ without a tag terminator",
-    `${"\\"}<\nscript>literal${"\\"}</\nscript>`,
-    "Ordinary colon uses: https://example.com, 12:30, and key: value.",
-    "Literal namespace:name without directive payload.",
-    "`{ unsafe +\nlooking } <foo.Bar /> <Δ /> (:note[unsafe]) export/**/default 1`",
-    "```mdx\n{ unsafe +\nlooking }\n<foo:Bar />\n<\nComponent>unsafe</\nComponent>\n<\nscript>unsafe</\nscript>\n<Δ />\n(:note[unsafe])\n> :::warning\n> unsafe\n> :::\nimport Map from './Map.astro'\nexport/**/default 1\n```",
-    "> ```md\n> :::warning\n> fenced example\n> :::\n> ```",
-    "- ```md\n  :::warning\n  fenced example\n  :::\n  ```"
+    "`{ code } <Badge>code</Badge> import value`",
+    "```mdx\n{ code }\n<Badge>code</Badge>\nexport default value\n```"
   ];
-  for (const body of oddEscapes) {
+
+  for (const body of safeBodies) {
     assert.deepEqual(
-      validateMarkdownSource(markdown(body), "escaped.md").issues,
+      validateMarkdownSource(markdown(body), "ordinary-prose.md").issues,
       [],
       body
     );
   }
-
-  const evenEscapes = [
-    [`Literal ${"\\".repeat(2)}{ foo +\nbar }`, "markdown/expression"],
-    [`Literal ${"\\".repeat(2)}<foo.Bar />`, "markdown/jsx"],
-    [`Literal ${"\\".repeat(2)}<foo:Bar />`, "markdown/jsx"],
-    [`${"\\".repeat(2)}<\nComponent>unsafe</\nComponent>`, "markdown/jsx"],
-    [`Literal ${"\\".repeat(2)}<Δ />`, "markdown/jsx"],
-    [`Literal ${"\\".repeat(2)}:note[example]`, "markdown/directive"],
-    [`Literal (${"\\".repeat(2)}:note[example])`, "markdown/directive"],
-    [`Literal text${"\\".repeat(2)}:note[example]`, "markdown/directive"],
-    [`${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"],
-    [`> ${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"],
-    [`- ${"\\".repeat(2)}:::active container marker`, "markdown/custom-container"]
-  ];
-  for (const [body, rule] of evenEscapes) {
-    assertFailsWith(validateMarkdownSource(markdown(body), "even.md").issues, rule);
-  }
 });
 
-test("maps many excluded-syntax diagnostics without rescanning source prefixes", () => {
-  const count = 8192;
-  const body = ":note[unsafe]\n".repeat(count);
-  const problems = validateMarkdownSource(markdown(body), "many-lines.md").issues;
-  const directives = problems.filter((problem) => problem.rule === "markdown/directive");
+test("caps diagnostics and rejects oversized CMS Markdown before parsing", () => {
+  const repeatedHtml = "<Badge>unsafe</Badge>\n\n".repeat(
+    CMS_MARKDOWN_LIMITS.maxDiagnostics * 3
+  );
+  const diagnostics = validateMarkdownSource(
+    markdown(repeatedHtml),
+    "many-diagnostics.md"
+  ).issues;
 
-  assert.equal(directives.length, count);
-  assert.equal(directives[0].line, 4);
-  assert.equal(directives[Math.floor(count / 2)].line, 4 + Math.floor(count / 2));
-  assert.equal(directives.at(-1).line, count + 3);
+  assert.equal(diagnostics.length, CMS_MARKDOWN_LIMITS.maxDiagnostics);
+  assert.ok(diagnostics.every((problem) => problem.rule === "markdown/html"));
+
+  const oversized = markdown("x".repeat(CMS_MARKDOWN_LIMITS.maxBytes));
+  assertFailsWith(
+    validateMarkdownSource(oversized, "oversized.md").issues,
+    "markdown/file-size"
+  );
 });
 
-test("does not rescan incomplete export prose into later escaped braces", () => {
-  const count = 4096;
-  const incompleteExports = "export class goods improve trade\n".repeat(count);
-  const body = `${incompleteExports}\nLater, ${"\\"}{example${"\\"}}.`;
-
+test("bounds large valid and unmatched-delimiter inputs", { timeout: 15_000 }, () => {
+  const largeValid = "Ordinary editor-native prose.\n".repeat(7_500);
+  assert.ok(Buffer.byteLength(markdown(largeValid)) < CMS_MARKDOWN_LIMITS.maxBytes);
   assert.deepEqual(
-    validateMarkdownSource(markdown(body), "many-incomplete-exports.md").issues,
+    validateMarkdownSource(markdown(largeValid), "large-valid.md").issues,
     []
   );
+
+  const unmatched = `${"{".repeat(100_000)}\n${"<".repeat(100_000)}`;
+  assert.ok(Buffer.byteLength(markdown(unmatched)) < CMS_MARKDOWN_LIMITS.maxBytes);
+  const started = performance.now();
+  const problems = validateMarkdownSource(markdown(unmatched), "unmatched.md").issues;
+  const elapsed = performance.now() - started;
+
+  assert.deepEqual(problems, []);
+  assert.ok(elapsed < 10_000, `unmatched input took ${elapsed.toFixed(0)}ms`);
 });
 
 test("validates inline, reference, image, definition, and autolink destinations", () => {
@@ -482,6 +474,23 @@ test("locks the exact fixed-page filename and route mapping", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("caps diagnostics across the complete repository scan", () => {
+  const root = makeFixedRepository((fixtureRoot) => {
+    for (let index = 0; index < CMS_MARKDOWN_LIMITS.maxDiagnostics * 2; index += 1) {
+      writeFileSync(
+        join(fixtureRoot, "src/content/faqs", `unsafe-${index}.md`),
+        markdown("<Badge>unsafe</Badge>", `question: Unsafe ${index}`)
+      );
+    }
+  });
+
+  try {
+    assert.equal(checkRepository(root).length, CMS_MARKDOWN_LIMITS.maxDiagnostics);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

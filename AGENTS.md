@@ -11,7 +11,9 @@ community. The production target is Cloudflare Workers Static Assets at
 - `pnpm dev`: run the local Astro development server.
 - `pnpm check`: run Astro type and content checks.
 - `pnpm check:uploads`: enforce local media upload limits.
-- `pnpm build`: run upload and Astro checks, then create the static `dist/` build.
+- `pnpm build` / `pnpm verify:deploy`: run upload, bounded CMS content,
+  Astro, static-build, and parse5 built-output checks.
+- `pnpm test:built-site`: run focused code-owned output invariant fixtures.
 - `pnpm test:worker`: run Worker request-handling tests.
 - `pnpm test:e2e`: run Playwright smoke tests against the preview server.
 - `pnpm preview`: preview the built site locally.
@@ -56,6 +58,9 @@ Use trunk-based development:
 - Only after a current valid activation record on tracking issue #46, reserve
   `cms/*` for Pages CMS draft-PR branches. While Pages CMS is frozen, do not
   create or use `cms/*` through Pages CMS.
+- After activation, editors save only on `cms/*`, wait for read-only branch CI,
+  and use **Open review PR**. That action dispatches the trusted
+  `cms-review.yml` from `main`; do not create a second PR manually.
 - Open a PR for changes into `main`.
 - Keep PRs small enough to merge quickly after CI passes.
 
@@ -79,6 +84,12 @@ Environment secrets and document the change first.
 Ask the owner before changing contact-data handling, security controls,
 secrets or bindings, production domains or deployment ownership, page routes,
 the content schema, or Pages CMS operations.
+
+Pages CMS rich-text Source switching stays disabled. Raw HTML, iframe,
+details/summary, and component-like tags are not an editable content surface;
+represent variable embeds with narrow structured data and render them in
+owner-reviewed Astro components. Repeat the unmerged rollout canary before a
+Pages CMS upgrade or rich-text capability change.
 
 For contact security or data-flow changes, domain or deployment lifecycle work,
 or broad navigation, route, or content-model changes, recommend the explicit
