@@ -65,7 +65,18 @@ export function parseCmsReviewPayload(
   if (!repository || typeof repository !== "object" || Array.isArray(repository)) {
     throw new Error("Pages CMS action payload must contain repository metadata.");
   }
-  if (repository.owner !== expectedOwner || repository.repo !== expectedRepo) {
+  const repositoryOwner = requiredString(
+    repository.owner,
+    "Pages CMS repository owner"
+  );
+  const repositoryName = requiredString(
+    repository.repo,
+    "Pages CMS repository name"
+  );
+  if (
+    repositoryOwner.toLowerCase() !== expectedOwner.toLowerCase() ||
+    repositoryName.toLowerCase() !== expectedRepo.toLowerCase()
+  ) {
     throw new Error("Pages CMS action repository must match this repository.");
   }
   if (repository.workflowRef !== "main") {
