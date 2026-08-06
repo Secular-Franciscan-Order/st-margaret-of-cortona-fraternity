@@ -1,6 +1,7 @@
 ---
 import MarkdownPage from "@/components/MarkdownPage.astro";
 import ContactForm from "@/components/ContactForm.astro";
+import LocationMap from "@/components/LocationMap.astro";
 import { getPages } from "@/lib/content";
 import { siteData } from "@/lib/site-data";
 import SiteLayout from "@/layouts/SiteLayout.astro";
@@ -19,10 +20,13 @@ export async function getStaticPaths() {
 
 const { page } = Astro.props;
 const showContactInfo = page.data.route === "/get-involved";
+const showLocationMap = page.data.route === "/who-we-are";
 ---
 
 <SiteLayout title={page.data.title} description={page.data.description}>
   <MarkdownPage page={page} />
+
+  {showLocationMap ? <LocationMap /> : null}
 
   {
     showContactInfo ? (

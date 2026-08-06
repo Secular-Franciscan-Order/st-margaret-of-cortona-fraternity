@@ -137,6 +137,7 @@ test("shows contact form submission feedback in the action area", async ({ page 
 test("renders the approved location map on Who We Are", async ({ page }) => {
   await page.goto("/who-we-are");
 
+  const mapSection = page.locator(".location-map");
   const map = page.getByTitle(
     "Map to St. Gabriel the Archangel Catholic Church"
   );
@@ -144,11 +145,39 @@ test("renders the approved location map on Who We Are", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Where We Meet" })
   ).toBeVisible();
+  await expect(mapSection).toHaveCount(1);
+  await expect(map).toHaveCount(1);
   await expect(map).toBeVisible();
   await expect(map).toHaveAttribute(
     "src",
-    /https:\/\/www\.google\.com\/maps\/embed/
+    "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3225.1709972320523!2d-115.12414712419509!3d36.064933072466!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x80c8cf8dbd7bbb27%3A0x79aa173c20f43d86!2sSt.%20Gabriel%20the%20Archangel%20Catholic%20Church!5e0!3m2!1sen!2sus!4v1782250735295!5m2!1sen!2sus"
   );
+  await expect(map).toHaveAttribute("loading", "lazy");
+  await expect(map).toHaveAttribute(
+    "referrerpolicy",
+    "strict-origin-when-cross-origin"
+  );
+  await expect(map).toHaveAttribute("allowfullscreen", "");
+  await expect(
+    page.getByText("We meet on the second Sunday of each month")
+  ).toBeVisible();
+  await expect(
+    page.getByText("Franciscan is spoken here. Peace and All Good to All !")
+  ).toBeVisible();
+
+  const markdownBounds = await page.locator(".markdown-page").boundingBox();
+  const mapBounds = await mapSection.boundingBox();
+
+  expect(markdownBounds).not.toBeNull();
+  expect(mapBounds).not.toBeNull();
+  expect(Math.abs(mapBounds!.x - markdownBounds!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(mapBounds!.width - markdownBounds!.width)).toBeLessThanOrEqual(
+    1
+  );
+  await expectNoHorizontalOverflow(page);
+
+  await page.goto("/get-involved");
+  await expect(page.locator(".location-map")).toHaveCount(0);
 });
 
 test("renders FAQ entries from the content collection", async ({ page }) => {
