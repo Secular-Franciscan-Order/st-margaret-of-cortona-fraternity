@@ -87,7 +87,7 @@ const optionalUploadedPdfPath = z
   });
 
 const pages = defineCollection({
-  loader: glob({ base: "./src/content/pages", pattern: "**/*.{md,mdx}" }),
+  loader: glob({ base: "./src/content/pages", pattern: "**/*.md" }),
   schema: z.object({
     title: z.string(),
     route: pageRoute,
@@ -98,7 +98,7 @@ const pages = defineCollection({
 });
 
 const faqs = defineCollection({
-  loader: glob({ base: "./src/content/faqs", pattern: "**/*.{md,mdx}" }),
+  loader: glob({ base: "./src/content/faqs", pattern: "**/*.md" }),
   schema: z.object({
     question: z.string(),
     order: z.number(),
@@ -107,7 +107,7 @@ const faqs = defineCollection({
 });
 
 const resources = defineCollection({
-  loader: glob({ base: "./src/content/resources", pattern: "**/*.{md,mdx}" }),
+  loader: glob({ base: "./src/content/resources", pattern: "**/*.md" }),
   schema: z.object({
     title: z.string(),
     order: z.number(),

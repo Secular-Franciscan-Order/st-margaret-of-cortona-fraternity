@@ -1,0 +1,198 @@
+name: CMS draft PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: Pages CMS payload as JSON
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: cms-review-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  draft-pr:
+    name: Open or reuse CMS draft PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted main workflow revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Validate trusted dispatch and Pages CMS payload
+        id: request
+        env:
+          CMS_ACTION_PAYLOAD: ${{ inputs.payload }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TRUSTED_REF: ${{ github.ref }}
+          TRUSTED_SHA: ${{ github.sha }}
+        run: node scripts/parse-cms-review-payload.mjs
+
+      - name: Verify exact trusted checkout
+        env:
+          TRUSTED_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"
+          test "$(git rev-parse --verify "$TRUSTED_SHA^{commit}")" = "$TRUSTED_SHA"
+
+      - name: Fetch current main and resolve named CMS head without checkout
+        id: cms_head
+        env:
+          CMS_BRANCH: ${{ steps.request.outputs.branch }}
+          TRUSTED_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          git check-ref-format --branch "$CMS_BRANCH"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$TRUSTED_SHA"
+          git fetch --no-tags origin "+refs/heads/$CMS_BRANCH:refs/remotes/origin/cms-review-head"
+          cms_head_sha="$(git rev-parse --verify "refs/remotes/origin/cms-review-head^{commit}")"
+          test "${#cms_head_sha}" -eq 40
+          case "$cms_head_sha" in
+            *[!0-9a-f]*) echo "Resolved CMS head is not a full commit SHA." >&2; exit 1 ;;
+          esac
+          printf 'sha=%s\n' "$cms_head_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Run trusted-main CMS changed-path gate
+        env:
+          CMS_HEAD_SHA: ${{ steps.cms_head.outputs.sha }}
+        run: node scripts/check-cms-changes.mjs --base-ref origin/main --head "$CMS_HEAD_SHA"
+
+      - name: Open one idempotent draft PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CMS_BRANCH: ${{ steps.request.outputs.branch }}
+          CMS_HEAD_SHA: ${{ steps.cms_head.outputs.sha }}
+          TRUSTED_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+          GH_REPO_OWNER: ${{ github.repository_owner }}
+          CMS_PR_BODY: |-
+            ## Pages CMS draft review
+
+            **This change is not published.** This draft was opened explicitly from the trusted main workflow for an activated cms/** content branch. It must remain unmerged until every gate below is complete.
+
+            - Wait for read-only branch and PR CI, including the trusted path boundary, bounded content/configuration guards, shared deploy verification, Worker tests, and Playwright.
+            - Approve an initial Actions run manually when GitHub requires it.
+            - Wait for the Cloudflare Workers Builds preview; Cloudflare remains the only preview and production integration.
+            - Inspect the complete diff and preview. Confirm every changed path and value is intended. Human full-diff review remains mandatory.
+            - Confirm the built /who-we-are output contains the one approved code-owned map and no other page contains it.
+            - When editing is complete, mark the PR ready for review and resolve every conversation.
+            - Update the branch from current main, rerun fresh checks, and re-inspect the updated diff and preview.
+            - Obtain one eligible approval. A bot-authored PR can normally receive an administrator's eligible approval; an owner-authored PR cannot be self-approved.
+            - A human performs the merge only after every check, preview, freshness, conversation, approval, and full-diff gate passes.
+
+            **Administrator warning:** a PR-only administrator bypass is an exceptional, commented, audited action after checks, full-diff review, and preview review. Record the GitHub bypass reason. It is never permission to push directly to main, skip the PR, or bypass production review.
+        run: |
+          set -eu
+
+          verify_remote_state() {
+            git fetch --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main \
+              "+refs/heads/$CMS_BRANCH:refs/remotes/origin/cms-review-head"
+            test "$(git rev-parse refs/remotes/origin/main)" = "$TRUSTED_SHA"
+            test "$(git rev-parse refs/remotes/origin/cms-review-head)" = "$CMS_HEAD_SHA"
+          }
+
+          list_prs() {
+            gh api --method GET "repos/$GH_REPO/pulls" \
+              -f state=open \
+              -f base=main \
+              -f head="$GH_REPO_OWNER:$CMS_BRANCH" \
+              -F per_page=100 | jq -c \
+                --arg repo "$GH_REPO" \
+                --arg branch "$CMS_BRANCH" \
+                '[.[] | select(.state == "open" and .base.ref == "main" and .head.ref == $branch and .head.repo.full_name == $repo)]'
+          }
+
+          verify_one_pr() {
+            pr_json="$1"
+            test "$(printf '%s' "$pr_json" | jq -r \
+              --arg repo "$GH_REPO" \
+              --arg branch "$CMS_BRANCH" \
+              --arg head "$CMS_HEAD_SHA" \
+              --arg base "$TRUSTED_SHA" \
+              'length == 1 and .[0].state == "open" and .[0].draft == true and .[0].base.ref == "main" and .[0].base.sha == $base and .[0].head.ref == $branch and .[0].head.sha == $head and .[0].head.repo.full_name == $repo')" = "true"
+          }
+
+          verify_body() {
+            pr_json="$1"
+            test "$(printf '%s' "$pr_json" | jq -r \
+              --arg body "$CMS_PR_BODY" \
+              'length == 1 and .[0].body == $body')" = "true"
+          }
+
+          ensure_approved_body() {
+            pr_json="$1"
+            if ! verify_body "$pr_json"; then
+              pr_number="$(printf '%s' "$pr_json" | jq -r '.[0].number')"
+              gh api --method PATCH "repos/$GH_REPO/pulls/$pr_number" \
+                -f body="$CMS_PR_BODY" >/dev/null
+            fi
+          }
+
+          finalize_candidate() {
+            pr_json="$1"
+            message="$2"
+            verify_one_pr "$pr_json"
+            verify_remote_state
+            ensure_approved_body "$pr_json"
+            verify_remote_state
+            verified="$(list_prs)"
+            verify_one_pr "$verified"
+            verify_body "$verified"
+            verify_remote_state
+            printf '%s #%s.\n' "$message" "$(printf '%s' "$verified" | jq -r '.[0].number')"
+          }
+
+          existing="$(list_prs)"
+          count="$(printf '%s' "$existing" | jq 'length')"
+          if test "$count" -gt 1; then
+            echo "More than one exact same-repository draft-PR candidate exists for $CMS_BRANCH; refusing to choose." >&2
+            exit 1
+          fi
+          if test "$count" -eq 1; then
+            finalize_candidate "$existing" "Reusing exact draft PR"
+            exit 0
+          fi
+
+          verify_remote_state
+          set +e
+          create_output="$(gh pr create \
+            --repo "$GH_REPO" \
+            --base main \
+            --head "$CMS_BRANCH" \
+            --draft \
+            --title "content: review ${CMS_BRANCH#cms/}" \
+            --body "$CMS_PR_BODY" 2>&1)"
+          create_status=$?
+          set -e
+          verify_remote_state
+
+          created="$(list_prs)"
+          if ! verify_one_pr "$created"; then
+            printf '%s\n' "$create_output" >&2
+            echo "PR creation did not produce exactly one matching draft PR at the requested head." >&2
+            exit 1
+          fi
+          finalize_candidate "$created" "Verified exact draft PR"
+
+          if test "$create_status" -ne 0; then
+            echo "A concurrent serialized request created the exact draft PR; reusing it."
+          else
+            printf '%s\n' "$create_output"
+          fi

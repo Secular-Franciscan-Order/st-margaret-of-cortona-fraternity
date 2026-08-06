@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - "cms/**"
 
 permissions:
   contents: read
@@ -16,6 +17,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -27,14 +31,27 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.5.0 --activate
 
+      - name: Fetch current main for CMS scope check
+        if: startsWith(github.head_ref, 'cms/') || startsWith(github.ref_name, 'cms/')
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Check CMS changed paths against exact head
+        if: startsWith(github.head_ref, 'cms/') || startsWith(github.ref_name, 'cms/')
+        env:
+          CMS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/check-cms-changes.mjs --base-ref origin/main --head "$CMS_HEAD_SHA"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check
-        run: pnpm check
+      - name: Test CMS safeguards
+        run: pnpm test:cms
 
-      - name: Build
-        run: pnpm build
+      - name: Test built-output safeguards
+        run: pnpm test:built-site
+
+      - name: Run shared deployment verification
+        run: pnpm verify:deploy
 
       - name: Test Worker
         run: pnpm test:worker

@@ -9,6 +9,16 @@ settings:
       delete: "content(delete): {path}"
       rename: "content(rename): {oldPath} -> {newPath}"
 
+actions:
+  - name: open-review-pr
+    label: Open review PR
+    workflow: cms-review.yml
+    ref: main
+    confirm:
+      title: Open review PR?
+      message: This change is not published. It still requires checks, preview, approval, and human merge.
+      button: Open review PR
+
 media:
   - name: images
     label: Images
@@ -116,8 +126,10 @@ content:
       - name: body
         label: Body
         type: rich-text
+        description: Editor-native Markdown only. Raw HTML, iframe, details/summary, component-like tags, unsupported rich-text features, and unsafe destinations are rejected. Source mode is disabled.
         options:
           format: markdown
+          switcher: false
           media: images
           extensions: [webp, jpg, jpeg, png]
           path: "."
@@ -151,8 +163,10 @@ content:
       - name: body
         label: Answer
         type: rich-text
+        description: Editor-native Markdown only. Raw HTML, iframe, details/summary, component-like tags, unsupported rich-text features, and unsafe destinations are rejected. Source mode is disabled.
         options:
           format: markdown
+          switcher: false
           media: images
           extensions: [webp, jpg, jpeg, png]
           path: "."
@@ -186,6 +200,7 @@ content:
       - name: uploadedFile
         label: Uploaded document
         type: file
+        description: Select only an approved PDF from Documents.
         options:
           media: documents
           extensions: [pdf]
@@ -193,6 +208,7 @@ content:
       - name: externalUrl
         label: External URL
         type: string
+        description: Use only an http(s) URL or leave this blank.
         pattern:
           regex: "^$|^https?://"
           message: "Use an http(s) URL or leave this blank."
@@ -202,8 +218,10 @@ content:
       - name: body
         label: Description
         type: rich-text
+        description: Editor-native Markdown only. Raw HTML, iframe, details/summary, component-like tags, unsupported rich-text features, and unsafe destinations are rejected. Source mode is disabled.
         options:
           format: markdown
+          switcher: false
           media: images
           extensions: [webp, jpg, jpeg, png]
           path: "."

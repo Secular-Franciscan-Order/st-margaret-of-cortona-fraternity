@@ -43,10 +43,16 @@ pnpm install
 ```sh
 pnpm dev
 pnpm check
+pnpm check:cms
+pnpm check:cms-changes -- --base-ref origin/main --head HEAD
+pnpm check:built-site
 pnpm check:uploads
 pnpm build
+pnpm verify:deploy
 pnpm test:worker
 pnpm test:e2e
+pnpm test:cms
+pnpm test:built-site
 pnpm preview
 pnpm deploy
 ```
@@ -54,11 +60,21 @@ pnpm deploy
 Important command behavior:
 
 - `pnpm dev` runs the local Astro development server.
-- `pnpm check` runs Astro type and content checks.
+- `pnpm check` runs the CMS content/configuration guard and Astro checks.
+- `pnpm check:cms` scans the exact Pages CMS configuration and bounded editable
+  Markdown with both the renderer-facing and Pages-CMS-facing parsers.
+- `pnpm check:cms-changes` compares an exact head with current `main` and
+  rejects changes outside the activated CMS ownership boundary.
 - `pnpm check:uploads` enforces local media upload limits.
-- `pnpm build` runs upload checks, Astro checks, and the static build.
+- `pnpm check:built-site` parses `dist` and enforces the code-owned location-map
+  invariant.
+- `pnpm build` and `pnpm verify:deploy` run the same upload, CMS, Astro, static
+  build, and built-output verification used by GitHub and Cloudflare.
 - `pnpm test:worker` runs Worker request-handling tests.
 - `pnpm test:e2e` runs Playwright smoke tests against `pnpm preview`.
+- `pnpm test:cms` runs the unsafe-content, configuration, and changed-path
+  fixture suites.
+- `pnpm test:built-site` runs focused built-output invariant fixtures.
 - `pnpm deploy` deploys the built site with Wrangler.
 
 Build the site before running Playwright locally:
@@ -96,6 +112,12 @@ time.
 
 Pages CMS configuration lives in `.pages.yml`.
 
+**Pages CMS is frozen.** Do not use it or create a `cms/*` branch unless the
+latest valid state-transition comment on [tracking issue #46](https://github.com/Secular-Franciscan-Order/st-margaret-of-cortona-fraternity/issues/46)
+is an authorized `[pages-cms-activation:v1]` / `Activation complete` record.
+Missing, edited, malformed, or revoked activation evidence means the freeze is
+in effect. See [content ownership and the audited CMS boundary](docs/content-ownership.md).
+
 Editors can update:
 
 - site settings and contact information
@@ -107,10 +129,68 @@ Editors can update:
 
 Fixed page creation, deletion, and rename operations are disabled because the
 site depends on those route files existing. FAQ and resource entries can be
-created, edited, unpublished, and deleted through Pages CMS.
+created, edited, unpublished, and deleted through Pages CMS only after
+activation.
 
-Pages CMS commits directly to `main`. Branch protection and app permissions
-must continue to allow the Pages CMS app to write content updates.
+Pages CMS must never commit directly to `main`. After activation, `cms/*` is
+reserved for Pages CMS draft-PR branches and all CMS changes require the
+documented checks, preview, eligible approval, full-diff review, and human
+merge.
+
+The three Markdown body fields use the Pages CMS visual rich-text editor with
+the Source switch disabled. Raw HTML, iframe, details/summary, and
+component-like tags are not a lossless editing surface and are rejected; maps,
+embeds, forms, and layout stay in owner-reviewed Astro code.
+
+### Conditional Pages CMS workflow
+
+Use this procedure only while the latest valid authorized state-transition
+comment on tracking issue #46 says `Activation complete`:
+
+1. Confirm that activation record is current and valid. Otherwise stop; Pages
+   CMS is frozen.
+2. In Pages CMS, select the current `main` branch first, then create a new
+   `cms/<topic>` branch. Pages CMS branches from the selected branch, so verify
+   this order and the starting SHA.
+3. Make only the intended edits within the audited surfaces in
+   `docs/content-ownership.md`.
+4. Save the intended CMS changes, wait for read-only branch CI, then select
+   **Open review PR** and confirm that the change is not published. The action
+   dispatches `cms-review.yml` from trusted `main` and opens or reuses exactly
+   one draft PR. Do not create a second PR for the branch.
+5. Manually approve an initial GitHub Actions run when GitHub requires that
+   approval.
+6. Inspect the complete diff, shared deploy verification, and Cloudflare
+   preview, and require all configured
+   checks to be green. Cloudflare Workers Builds remains the only preview and
+   production integration.
+7. Mark the PR ready, resolve every conversation, update the branch from
+   current `main`, rerun fresh checks, and re-inspect the updated diff and
+   preview.
+8. Obtain one eligible approval. Bot-authored CMS PRs can normally be approved
+   by an administrator; an owner-authored PR cannot be self-approved.
+9. A human merges only after all checks, preview, freshness, conversation,
+   approval, and full-diff gates pass.
+
+The privileged draft-PR workflow checks out trusted `main`, validates the
+Pages CMS payload's workflow SHA against that exact revision, fetches the
+selected `cms/**` branch without checking it out, derives its exact head for the
+trusted changed-path gate, and re-fetches both `main` and the CMS head
+immediately before and after draft-PR creation or reuse. It ignores same-named
+fork PRs, binds the draft to the trusted base SHA, and restores and verifies the
+approved review body before success. CMS-head workflows and scripts run only in
+ordinary read-only CI. Human review of the full diff remains mandatory. A
+PR-only administrator bypass is an explicit, commented, audited exception after
+checks, diff, and preview review. Record the GitHub bypass reason; this is never
+permission to push directly to `main`.
+
+The draft-PR workflow needs the repository setting **Allow GitHub Actions to
+create and approve pull requests**. Its first run can require manual workflow
+approval. Apply or test that setting and the required `main` rules only under a
+separately authorized rollout; see `docs/repo-settings.md`.
+
+Repeat the separately authorized disposable, unmerged rollout canary before
+adopting a new Pages CMS release or changing any rich-text capability.
 
 ## Media Upload Rules
 
@@ -205,6 +285,8 @@ This repository uses trunk-based development:
 - `main` is the only long-lived branch and production source.
 - Work happens on short-lived branches such as `feat/*`, `fix/*`,
   `chore/*`, and `docs/*`.
+- Only after valid activation, `cms/*` is reserved for Pages CMS draft-PR
+  branches; it is not a general-purpose branch prefix.
 - Pull requests merge to `main` only after CI passes.
 - Unfinished work should use drafts, hidden routes, preview builds, or feature
   flags rather than long-lived branches.
