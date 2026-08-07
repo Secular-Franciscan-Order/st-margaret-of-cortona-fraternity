@@ -209,7 +209,7 @@ const EXPECTED_PAGES_CONFIG = {
       filename: { template: "{primary}.md", field: "create" },
       view: {
         primary: "question",
-        fields: ["order", "published"],
+        fields: ["question", "order", "published"],
         sort: ["order", "question"],
         search: ["question", "body"],
         default: { sort: "order", order: "asc" }
@@ -246,7 +246,7 @@ const EXPECTED_PAGES_CONFIG = {
       filename: { template: "{primary}.md", field: "create" },
       view: {
         primary: "title",
-        fields: ["linkLabel", "sortDate", "published"],
+        fields: ["title", "sortDate", "published"],
         sort: ["sortDate", "title"],
         search: ["title", "linkLabel", "body"],
         default: { sort: "sortDate", order: "desc" }
