@@ -1,10 +1,7 @@
 ---
 title: Summer 2023
 order: 80
-linkLabel: ""
-uploadedFile: ""
-externalUrl: ""
+linkLabel: Early summer publication
 published: true
 ---
-
-Early summer publication of Our Franciscan Scoop for the St. Thomas More Region of of Secular Franciscan.
+ of Our Fraternal Scoop for the St. Thomas More Region of of Secular Franciscan.
