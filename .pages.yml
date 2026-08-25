@@ -99,9 +99,12 @@ content:
       delete: false
     view:
       primary: title
-      sort: navOrder
-      order: asc
-      fields: [route, navLabel]
+      fields: [navOrder, route, navLabel]
+      sort: [navOrder, title]
+      search: [title, navLabel, route]
+      default:
+        sort: navOrder
+        order: asc
     fields:
       - name: title
         label: Title
@@ -145,18 +148,25 @@ content:
       field: create
     view:
       primary: question
-      sort: order
-      order: asc
-      fields: [published]
+      fields: [question, order, published]
+      sort: [order, question]
+      search: [question, body]
+      default:
+        sort: order
+        order: asc
     fields:
       - name: question
         label: Question
         type: string
         required: true
       - name: order
-        label: Display order
+        label: Position
         type: number
         required: true
+        description: Smaller numbers appear first. Use multiples of 10 so another FAQ can be inserted between existing entries.
+        default: 1000
+        options:
+          min: 0
       - name: published
         label: Published
         type: boolean
@@ -182,18 +192,24 @@ content:
       field: create
     view:
       primary: title
-      sort: order
-      order: asc
-      fields: [published, externalUrl, uploadedFile]
+      fields: [title, sortDate, published]
+      sort: [sortDate, title]
+      search: [title, linkLabel, body]
+      default:
+        sort: sortDate
+        order: desc
     fields:
       - name: title
         label: Title
         type: string
         required: true
-      - name: order
-        label: Display order
-        type: number
+      - name: sortDate
+        label: Sort date
+        type: date
         required: true
+        description: Controls newest-first display. New entries default to today; adjust this date if needed. It is used for ordering only.
+        options:
+          format: yyyy-MM-dd
       - name: linkLabel
         label: Link label
         type: string

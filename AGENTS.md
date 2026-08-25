@@ -79,7 +79,7 @@ Environment secrets and document the change first.
   checks, Turnstile verification, output escaping, no-store responses, and
   email-only delivery unless an approved design replaces them.
 
-## Risk gates and reviewed changes
+## Risk gates
 
 Ask the owner before changing contact-data handling, security controls,
 secrets or bindings, production domains or deployment ownership, page routes,
@@ -90,11 +90,3 @@ details/summary, and component-like tags are not an editable content surface;
 represent variable embeds with narrow structured data and render them in
 owner-reviewed Astro components. Repeat the unmerged rollout canary before a
 Pages CMS upgrade or rich-text capability change.
-
-For contact security or data-flow changes, domain or deployment lifecycle work,
-or broad navigation, route, or content-model changes, recommend the explicit
-`reviewed-change` workflow with a concise rationale and wait for owner approval
-before starting it. Workflow approval selects process rigor; it does not
-authorize secret access or production action. Keep routine copy, FAQ and news
-entries, approved media, and localized styling lightweight unless their actual
-risk expands.

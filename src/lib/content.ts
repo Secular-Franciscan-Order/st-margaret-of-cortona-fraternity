@@ -8,6 +8,13 @@ const byNavOrder = (
 const byOrder = <T extends { data: { order: number } }>(a: T, b: T) =>
   a.data.order - b.data.order;
 
+const bySortDateDescending = (
+  a: CollectionEntry<"resources">,
+  b: CollectionEntry<"resources">
+) =>
+  b.data.sortDate.getTime() - a.data.sortDate.getTime() ||
+  a.data.title.localeCompare(b.data.title);
+
 export async function getPages() {
   const pages = await getCollection("pages");
   return pages.sort(byNavOrder);
@@ -38,5 +45,5 @@ export async function getPublishedResources() {
     "resources",
     ({ data }) => data.published
   );
-  return resources.sort(byOrder);
+  return resources.sort(bySortDateDescending);
 }

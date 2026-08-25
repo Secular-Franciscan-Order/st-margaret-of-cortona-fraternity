@@ -100,14 +100,14 @@ function writeFixture(root: string) {
     root,
     "src/content/resources/nested/defaults.md",
     markdown(
-      "title: Default resource\norder: 20\nexternalUrl: https://example.com/default.pdf"
+      "title: Default resource\nsortDate: 2026-04-01\nexternalUrl: https://example.com/default.pdf"
     )
   );
   write(
     root,
     "src/content/resources/upload.md",
     markdown(
-      "title: Uploaded resource\norder: 10\nlinkLabel: Download fixture\nuploadedFile: /uploads/documents/fixture.pdf\nexternalUrl: https://example.com/fallback.pdf\npublished: true",
+      "title: Uploaded resource\nsortDate: 2026-07-01\nlinkLabel: Download fixture\nuploadedFile: /uploads/documents/fixture.pdf\nexternalUrl: https://example.com/fallback.pdf\npublished: true",
       ""
     )
   );
@@ -115,7 +115,7 @@ function writeFixture(root: string) {
     root,
     "src/content/resources/nested/text-only.md",
     markdown(
-      "title: Text-only resource\norder: 30",
+      "title: Text-only resource\nsortDate: 2024-01-01",
       "Body with an editor-authored [nested link][body-link] and [empty link][empty-link].\n\n![Reference fixture][body-image]\n\n[body-link]: https://example.com/body\n[empty-link]: <>\n[body-image]: /uploads/images/reference.png"
     )
   );
@@ -123,12 +123,12 @@ function writeFixture(root: string) {
     root,
     "src/content/resources/unpublished.md",
     markdown(
-      "title: Hidden resource\norder: 5\nexternalUrl: https://example.com/hidden.pdf\npublished: false"
+      "title: Hidden resource\nsortDate: 2027-01-01\nexternalUrl: https://example.com/hidden.pdf\npublished: false"
     )
   );
 }
 
-test("CMS expectations follow isolated source mutations and schema defaults", () => {
+test("CMS expectations follow source mutations, defaults, and newest-first resource dates", () => {
   const root = mkdtempSync(join(tmpdir(), "cms-expectations-"));
 
   try {
@@ -242,6 +242,11 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
         ]
       ]
     );
+    assert.deepEqual(
+      initial.publishedResources.map(({ sortDate }) => sortDate),
+      ["2026-07-01", "2026-04-01", "2024-01-01"],
+      "a summer sort date must appear before the spring sort date in the same year"
+    );
 
     write(
       root,
@@ -282,7 +287,7 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
       root,
       "src/content/resources/nested/defaults.md",
       markdown(
-        "title: Default resource\norder: 20\nlinkLabel: Read the update\nuploadedFile: /uploads/documents/mutated.pdf\nexternalUrl: https://example.com/default.pdf"
+        "title: Default resource\nsortDate: 2026-08-01\nlinkLabel: Read the update\nuploadedFile: /uploads/documents/mutated.pdf\nexternalUrl: https://example.com/default.pdf"
       )
     );
 
@@ -327,16 +332,16 @@ test("CMS expectations follow isolated source mutations and schema defaults", ()
       ),
       [
         [
-          "Uploaded resource",
-          "Download fixture",
-          "/uploads/documents/fixture.pdf",
-          emptyBody
-        ],
-        [
           "Default resource",
           "Read the update",
           "/uploads/documents/mutated.pdf",
           fixtureBody
+        ],
+        [
+          "Uploaded resource",
+          "Download fixture",
+          "/uploads/documents/fixture.pdf",
+          emptyBody
         ],
         [
           "Text-only resource",
