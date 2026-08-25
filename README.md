@@ -245,13 +245,17 @@ Add an FAQ:
 
 - Add a Markdown file under `src/content/faqs/`.
 - Set `question`, `order`, and `published` in frontmatter.
+- Smaller `order` values appear first. Use multiples of 10 so there is room to
+  insert an FAQ between existing entries; new CMS entries default to 1000.
 - Write the answer in Markdown body content.
 
 Add a newsletter or resource:
 
 - Add a Markdown file under `src/content/resources/`.
-- Set `title`, `order`, `linkLabel`, `published`, and either `externalUrl` or
-  `uploadedFile`.
+- Set `title`, `sortDate`, `linkLabel`, `published`, and either `externalUrl`
+  or `uploadedFile`.
+- Use `sortDate` in `YYYY-MM-DD` format to control newest-first display. It is
+  an ordering value and does not need to claim an exact publication date.
 - Use `externalUrl` for PDFs hosted elsewhere.
 - Use `uploadedFile` only for local PDFs under `/uploads/documents/`.
 

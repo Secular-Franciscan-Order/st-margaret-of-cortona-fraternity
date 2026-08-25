@@ -38,6 +38,18 @@ const isHttpUrl = (value: string) => {
   }
 };
 
+const isIsoDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
+};
+
 const isUploadedPdfPath = (value: string) => {
   if (value === "") {
     return true;
@@ -86,6 +98,16 @@ const optionalUploadedPdfPath = z
       "Uploaded file must be empty or a PDF path under /uploads/documents/."
   });
 
+const resourceSortDate = z.union([
+  z.date(),
+  z
+    .string()
+    .refine(isIsoDate, {
+      message: "Sort date must be a valid date in YYYY-MM-DD format."
+    })
+    .transform((value) => new Date(`${value}T00:00:00Z`))
+]);
+
 const pages = defineCollection({
   loader: glob({ base: "./src/content/pages", pattern: "**/*.md" }),
   schema: z.object({
@@ -101,7 +123,7 @@ const faqs = defineCollection({
   loader: glob({ base: "./src/content/faqs", pattern: "**/*.md" }),
   schema: z.object({
     question: z.string(),
-    order: z.number(),
+    order: z.number().nonnegative(),
     published: z.boolean().default(true)
   })
 });
@@ -110,7 +132,7 @@ const resources = defineCollection({
   loader: glob({ base: "./src/content/resources", pattern: "**/*.md" }),
   schema: z.object({
     title: z.string(),
-    order: z.number(),
+    sortDate: resourceSortDate,
     linkLabel: z.string().optional().default(""),
     uploadedFile: optionalUploadedPdfPath,
     externalUrl: optionalHttpUrl,
