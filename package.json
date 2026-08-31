@@ -24,10 +24,10 @@
     "test:cms": "node --experimental-strip-types --test tests/cms-content.spec.mjs tests/cms-changes.spec.mjs tests/cms-expectations.spec.ts tests/cms-review.spec.mjs"
   },
   "devDependencies": {
-    "@astrojs/check": "0.9.9",
+    "@astrojs/check": "0.9.10",
     "@playwright/test": "1.60.0",
     "@types/node": "25.9.1",
-    "astro": "6.4.2",
+    "astro": "7.2.9",
     "marked": "17.0.5",
     "mdast-util-from-markdown": "2.0.3",
     "parse5": "7.3.0",
