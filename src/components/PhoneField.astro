@@ -31,13 +31,28 @@ const countryOptions: readonly CountryOption[] = getCountries()
   <div class="contact-form__phone-row">
     <div class="contact-form__field contact-form__country-field">
       <label for="contact-phone-country">Country or calling code</label>
-      <select id="contact-phone-country" data-phone-country>
-        {
-          countryOptions.map(({ code, label }) => (
-            <option value={code} selected={code === "US"}>{label}</option>
-          ))
-        }
-      </select>
+      <div class="contact-form__country-control">
+        <select id="contact-phone-country" data-phone-country>
+          {
+            countryOptions.map(({ code, label }) => (
+              <option value={code} selected={code === "US"}>{label}</option>
+            ))
+          }
+        </select>
+        <svg
+          class="contact-form__country-chevron"
+          viewBox="0 0 12 8"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path
+            d="m1 1 5 5 5-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="square"
+            stroke-width="1.5"></path>
+        </svg>
+      </div>
     </div>
 
     <div class="contact-form__field contact-form__phone-input-field">

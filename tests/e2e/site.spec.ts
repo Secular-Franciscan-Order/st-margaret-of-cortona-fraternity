@@ -234,6 +234,67 @@ test("renders a contact form with source-backed contact information", async ({
   );
 });
 
+test("aligns the phone country selector with the phone input", async ({ page }) => {
+  const viewportWidths = [375, 768, 1280] as const;
+
+  for (const width of viewportWidths) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/get-involved");
+
+    const country = page.getByLabel("Country or calling code", { exact: true });
+    const phone = page.getByLabel("Phone number (optional)", { exact: true });
+    const countryBounds = await country.boundingBox();
+    const phoneBounds = await phone.boundingBox();
+
+    expect(countryBounds).not.toBeNull();
+    expect(phoneBounds).not.toBeNull();
+    if (countryBounds === null || phoneBounds === null) {
+      throw new TypeError(`Phone controls did not render at ${width}px`);
+    }
+
+    expect(Math.abs(countryBounds.height - phoneBounds.height)).toBeLessThanOrEqual(1);
+    if (width >= 768) {
+      expect(Math.abs(countryBounds.y - phoneBounds.y)).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(
+          countryBounds.y + countryBounds.height - (phoneBounds.y + phoneBounds.height)
+        )
+      ).toBeLessThanOrEqual(1);
+    }
+
+    const countryStyle = await country.evaluate((element) => {
+      const style = getComputedStyle(element);
+
+      return {
+        appearance: style.appearance,
+        boxSizing: style.boxSizing,
+        paddingBlockEnd: Number.parseFloat(style.paddingBlockEnd),
+        paddingBlockStart: Number.parseFloat(style.paddingBlockStart),
+        paddingInlineEnd: Number.parseFloat(style.paddingInlineEnd),
+        paddingInlineStart: Number.parseFloat(style.paddingInlineStart),
+        textAlign: style.textAlign,
+        textAlignLast: style.textAlignLast
+      };
+    });
+
+    expect(countryStyle.appearance).toBe("none");
+    expect(countryStyle.boxSizing).toBe("border-box");
+    expect(countryStyle.textAlign).toBe("center");
+    expect(countryStyle.textAlignLast).toBe("center");
+    expect(
+      Math.abs(countryStyle.paddingInlineStart - countryStyle.paddingInlineEnd)
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(countryStyle.paddingBlockStart - countryStyle.paddingBlockEnd)
+    ).toBeLessThanOrEqual(1);
+
+    await expect(page.locator(".contact-form__country-chevron")).toHaveAttribute(
+      "aria-hidden",
+      "true"
+    );
+  }
+});
+
 test("shows contact form submission feedback in the action area", async ({ page }) => {
   await page.route("**/api/contact", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 100));
