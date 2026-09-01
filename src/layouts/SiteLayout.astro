@@ -114,6 +114,7 @@ const normalizePath = (path: string) => path.replace(/\/$/, "") || "/";
     --color-focus: #006b5c;
     --site-width: 940px;
     --content-width: 780px;
+    --contact-control-height: 2.45rem;
     --font-heading: "Avenir LT Wix", "Helvetica Neue", Arial, sans-serif;
     --font-body: "Questrial Wix", "Helvetica Neue", Arial, sans-serif;
     color: var(--color-ink);
@@ -443,6 +444,18 @@ const normalizePath = (path: string) => path.replace(/\/$/, "") || "/";
     gap: 1.1rem;
   }
 
+  .contact-form__phone-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 1.1rem;
+    align-items: end;
+  }
+
+  .contact-form__country-field,
+  .contact-form__phone-input-field {
+    min-width: 0;
+  }
+
   .contact-form__field {
     display: grid;
     gap: 0.5rem;
@@ -455,6 +468,7 @@ const normalizePath = (path: string) => path.replace(/\/$/, "") || "/";
   }
 
   .contact-form input,
+  .contact-form select,
   .contact-form textarea {
     width: 100%;
     border: 1px solid var(--color-ink);
@@ -466,9 +480,35 @@ const normalizePath = (path: string) => path.replace(/\/$/, "") || "/";
     line-height: 1.3;
   }
 
-  .contact-form input {
-    min-height: 2.45rem;
+  .contact-form input,
+  .contact-form select {
+    box-sizing: border-box;
+    height: var(--contact-control-height);
+    min-height: var(--contact-control-height);
     padding: 0.45rem 0.65rem;
+  }
+
+  .contact-form__country-control {
+    position: relative;
+  }
+
+  .contact-form__country-control select {
+    display: block;
+    appearance: none;
+    padding-inline: 2rem;
+    text-align: center;
+    text-align-last: center;
+  }
+
+  .contact-form__country-chevron {
+    position: absolute;
+    inset-block-start: 50%;
+    inset-inline-end: 0.65rem;
+    width: 0.75rem;
+    height: auto;
+    color: var(--color-ink);
+    pointer-events: none;
+    transform: translateY(-50%);
   }
 
   .contact-form textarea {
@@ -478,6 +518,7 @@ const normalizePath = (path: string) => path.replace(/\/$/, "") || "/";
   }
 
   .contact-form input:focus,
+  .contact-form select:focus,
   .contact-form textarea:focus {
     outline: 3px solid var(--color-focus);
     outline-offset: 0.1rem;
@@ -732,6 +773,10 @@ const normalizePath = (path: string) => path.replace(/\/$/, "") || "/";
 
     .contact-form {
       margin-top: 2rem;
+    }
+
+    .contact-form__phone-row {
+      grid-template-columns: 1fr;
     }
 
     .news-entry {

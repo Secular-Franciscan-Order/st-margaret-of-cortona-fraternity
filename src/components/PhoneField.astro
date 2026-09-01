@@ -1,0 +1,85 @@
+---
+import {
+  getCountries,
+  getCountryCallingCode,
+  type CountryCode
+} from "libphonenumber-js/min";
+
+type CountryOption = {
+  readonly code: CountryCode;
+  readonly label: string;
+};
+
+const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
+const countryOptions: readonly CountryOption[] = getCountries()
+  .map((code) => {
+    const name = displayNames.of(code);
+
+    if (name === undefined) {
+      throw new TypeError(`Missing English region name for ${code}`);
+    }
+
+    return {
+      code,
+      label: `${name} (+${getCountryCallingCode(code)})`
+    };
+  })
+  .sort((left, right) => left.label.localeCompare(right.label, "en"));
+---
+
+<div class="contact-form__phone-field" data-phone-field>
+  <div class="contact-form__phone-row">
+    <div class="contact-form__field contact-form__country-field">
+      <label for="contact-phone-country">Country or calling code</label>
+      <div class="contact-form__country-control">
+        <select id="contact-phone-country" data-phone-country>
+          {
+            countryOptions.map(({ code, label }) => (
+              <option value={code} selected={code === "US"}>{label}</option>
+            ))
+          }
+        </select>
+        <svg
+          class="contact-form__country-chevron"
+          viewBox="0 0 12 8"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path
+            d="m1 1 5 5 5-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="square"
+            stroke-width="1.5"></path>
+        </svg>
+      </div>
+    </div>
+
+    <div class="contact-form__field contact-form__phone-input-field">
+      <label for="contact-phone">Phone number (optional)</label>
+      <input
+        id="contact-phone"
+        name="phone"
+        type="tel"
+        inputmode="tel"
+        autocomplete="tel"
+        maxlength="32"
+        pattern="\\+?\\(?[0-9][0-9\\(\\) \\.\\-]{5,28}[0-9]"
+        aria-describedby="contact-phone-status"
+        data-phone-input
+      />
+    </div>
+  </div>
+
+  <p
+    id="contact-phone-status"
+    class="contact-form__phone-status visually-hidden"
+    aria-live="polite"
+    role="status"
+    data-phone-status
+  ></p>
+</div>
+
+<script>
+  import "@/scripts/phone-field";
+</script>
