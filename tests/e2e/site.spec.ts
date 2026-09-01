@@ -22,6 +22,17 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(overflow).toBeLessThanOrEqual(1);
 }
 
+async function injectSyntheticTurnstile(form: Locator) {
+  await form.evaluate((element) => {
+    const token = element.querySelector<HTMLInputElement>(
+      '[name="cf-turnstile-response"]'
+    ) ?? document.createElement("input");
+    token.name = "cf-turnstile-response";
+    token.value = "test-token";
+    if (!token.parentElement) element.append(token);
+  });
+}
+
 async function expectRenderedCmsBody(
   container: Locator,
   body: MarkdownBodyExpectation,
@@ -143,6 +154,26 @@ test("renders a contact form with source-backed contact information", async ({
   await expect(page.getByLabel("First Name")).toBeVisible();
   await expect(page.getByLabel("Last Name")).toBeVisible();
   await expect(page.getByLabel(/Email/)).toHaveAttribute("required", "");
+  const phone = page.getByLabel("Phone (optional)", { exact: true });
+  await expect(phone).toBeVisible();
+  await expect(phone).toHaveAttribute("id", "contact-phone");
+  await expect(phone).toHaveAttribute("name", "phone");
+  await expect(phone).toHaveAttribute("type", "tel");
+  await expect(phone).toHaveAttribute("inputmode", "tel");
+  await expect(phone).toHaveAttribute("autocomplete", "tel");
+  await expect(phone).toHaveAttribute("maxlength", "32");
+  await expect(phone).toHaveAttribute(
+    "pattern",
+    String.raw`\+?\(?[0-9][0-9\(\) \.\-]{5,28}[0-9]`
+  );
+  await expect(phone).not.toHaveAttribute("required", "");
+  await expect(phone).not.toHaveAttribute("placeholder", /.*/);
+  await expect(phone).not.toHaveAttribute("title", /.*/);
+  expect(
+    await page
+      .locator("#contact-email, #contact-phone, #contact-message")
+      .evaluateAll((elements) => elements.map(({ id }) => id))
+  ).toEqual(["contact-email", "contact-phone", "contact-message"]);
   await expect(page.getByLabel("Message")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(page.locator(".cf-turnstile")).toHaveAttribute(
@@ -163,14 +194,7 @@ test("shows contact form submission feedback in the action area", async ({ page 
 
   const form = page.locator(".contact-form");
   await page.getByLabel(/Email/).fill("visitor@example.com");
-  await form.evaluate((element) => {
-    const token = element.querySelector<HTMLInputElement>(
-      '[name="cf-turnstile-response"]'
-    ) ?? document.createElement("input");
-    token.name = "cf-turnstile-response";
-    token.value = "test-token";
-    if (!token.parentElement) element.append(token);
-  });
+  await injectSyntheticTurnstile(form);
 
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByRole("button", { name: "Sending your message" })).toBeDisabled();
@@ -188,6 +212,71 @@ test("shows contact form submission feedback in the action area", async ({ page 
   await form.getByRole("button", { name: "Send another message" }).click();
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(form.locator(".cf-turnstile")).toBeVisible();
+});
+
+test("submits a valid optional phone in contact form data", async ({ page }) => {
+  let submittedPhone: FormDataEntryValue | null = null;
+  await page.route("**/api/contact", async (route) => {
+    const body = route.request().postDataBuffer();
+    const contentType = await route.request().headerValue("content-type");
+
+    expect(body).not.toBeNull();
+    expect(contentType).not.toBeNull();
+    if (body === null || contentType === null) {
+      await route.abort();
+      return;
+    }
+
+    const formData = await new Response(Uint8Array.from(body).buffer, {
+      headers: { "content-type": contentType }
+    }).formData();
+    submittedPhone = formData.get("phone");
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Thank you. Your message has been sent." })
+    });
+  });
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await page.getByLabel("Phone (optional)").fill("+1 (702) 555-0100");
+  await injectSyntheticTurnstile(form);
+
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(form.locator(".contact-form__success")).toBeVisible();
+  expect(submittedPhone).toBe("+1 (702) 555-0100");
+});
+
+test("blocks an invalid contact phone before the API request", async ({ page }) => {
+  let contactApiCalls = 0;
+  await page.route("**/api/contact", async (route) => {
+    contactApiCalls += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Unexpected request." })
+    });
+  });
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  const phone = page.getByLabel("Phone (optional)");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await phone.fill("not-a-phone");
+  await injectSyntheticTurnstile(form);
+
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  expect(
+    await page.evaluate(
+      () =>
+        document.querySelector<HTMLInputElement>("#contact-phone")?.validity
+          .patternMismatch
+    )
+  ).toBe(true);
+  await expect(form.locator(".contact-form__success")).toBeHidden();
+  expect(contactApiCalls).toBe(0);
 });
 
 test("renders the approved location map on Who We Are", async ({ page }) => {
