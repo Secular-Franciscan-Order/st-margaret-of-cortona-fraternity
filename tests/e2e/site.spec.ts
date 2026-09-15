@@ -22,6 +22,61 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(overflow).toBeLessThanOrEqual(1);
 }
 
+async function injectSyntheticTurnstile(form: Locator) {
+  await form.evaluate((element) => {
+    const token = element.querySelector<HTMLInputElement>(
+      '[name="cf-turnstile-response"]'
+    ) ?? document.createElement("input");
+    token.name = "cf-turnstile-response";
+    token.value = "test-token";
+    if (!token.parentElement) element.append(token);
+  });
+}
+
+async function pasteText(input: Locator, text: string) {
+  await input.evaluate((element, pastedText) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text/plain", pastedText);
+    element.dispatchEvent(
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData
+      })
+    );
+  }, text);
+}
+
+type SubmissionCapture = {
+  phone: FormDataEntryValue | null;
+};
+
+async function captureContactSubmission(
+  page: Page,
+  capture: SubmissionCapture
+) {
+  await page.route("**/api/contact", async (route) => {
+    const body = route.request().postDataBuffer();
+    const contentType = await route.request().headerValue("content-type");
+
+    expect(body).not.toBeNull();
+    expect(contentType).not.toBeNull();
+    if (body === null || contentType === null) {
+      await route.abort();
+      return;
+    }
+
+    const formData = await new Response(Uint8Array.from(body).buffer, {
+      headers: { "content-type": contentType }
+    }).formData();
+    capture.phone = formData.get("phone");
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Thank you. Your message has been sent." })
+    });
+  });
+}
+
 async function expectRenderedCmsBody(
   container: Locator,
   body: MarkdownBodyExpectation,
@@ -143,12 +198,101 @@ test("renders a contact form with source-backed contact information", async ({
   await expect(page.getByLabel("First Name")).toBeVisible();
   await expect(page.getByLabel("Last Name")).toBeVisible();
   await expect(page.getByLabel(/Email/)).toHaveAttribute("required", "");
+  const country = page.getByLabel("Country or calling code", { exact: true });
+  await expect(country).toBeVisible();
+  await expect(country).toHaveValue("US");
+  await expect(country.locator('option[value="US"]')).toHaveText(
+    "United States (+1)"
+  );
+  await expect(country).not.toHaveAttribute("name", /.*/);
+  await expect(country).not.toHaveAttribute("autocomplete", /.*/);
+  const phone = page.getByLabel("Phone number (optional)", { exact: true });
+  await expect(phone).toBeVisible();
+  await expect(phone).toHaveAttribute("id", "contact-phone");
+  await expect(phone).toHaveAttribute("name", "phone");
+  await expect(phone).toHaveAttribute("type", "tel");
+  await expect(phone).toHaveAttribute("inputmode", "tel");
+  await expect(phone).toHaveAttribute("autocomplete", "tel");
+  await expect(phone).toHaveAttribute("maxlength", "32");
+  await expect(phone).toHaveAttribute(
+    "pattern",
+    String.raw`\+?\(?[0-9][0-9\(\) \.\-]{5,28}[0-9]`
+  );
+  await expect(phone).not.toHaveAttribute("required", "");
+  await expect(phone).not.toHaveAttribute("placeholder", /.*/);
+  await expect(phone).not.toHaveAttribute("title", /.*/);
+  expect(
+    await page
+      .locator("#contact-email, #contact-phone, #contact-message")
+      .evaluateAll((elements) => elements.map(({ id }) => id))
+  ).toEqual(["contact-email", "contact-phone", "contact-message"]);
   await expect(page.getByLabel("Message")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(page.locator(".cf-turnstile")).toHaveAttribute(
     "data-sitekey",
     "0x4AAAAAAEERQmwQp-jP4ygz"
   );
+});
+
+test("aligns the phone country selector with the phone input", async ({ page }) => {
+  const viewportWidths = [375, 768, 1280] as const;
+
+  for (const width of viewportWidths) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/get-involved");
+
+    const country = page.getByLabel("Country or calling code", { exact: true });
+    const phone = page.getByLabel("Phone number (optional)", { exact: true });
+    const countryBounds = await country.boundingBox();
+    const phoneBounds = await phone.boundingBox();
+
+    expect(countryBounds).not.toBeNull();
+    expect(phoneBounds).not.toBeNull();
+    if (countryBounds === null || phoneBounds === null) {
+      throw new TypeError(`Phone controls did not render at ${width}px`);
+    }
+
+    expect(Math.abs(countryBounds.height - phoneBounds.height)).toBeLessThanOrEqual(1);
+    if (width >= 768) {
+      expect(Math.abs(countryBounds.y - phoneBounds.y)).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(
+          countryBounds.y + countryBounds.height - (phoneBounds.y + phoneBounds.height)
+        )
+      ).toBeLessThanOrEqual(1);
+    }
+
+    const countryStyle = await country.evaluate((element) => {
+      const style = getComputedStyle(element);
+
+      return {
+        appearance: style.appearance,
+        boxSizing: style.boxSizing,
+        paddingBlockEnd: Number.parseFloat(style.paddingBlockEnd),
+        paddingBlockStart: Number.parseFloat(style.paddingBlockStart),
+        paddingInlineEnd: Number.parseFloat(style.paddingInlineEnd),
+        paddingInlineStart: Number.parseFloat(style.paddingInlineStart),
+        textAlign: style.textAlign,
+        textAlignLast: style.textAlignLast
+      };
+    });
+
+    expect(countryStyle.appearance).toBe("none");
+    expect(countryStyle.boxSizing).toBe("border-box");
+    expect(countryStyle.textAlign).toBe("center");
+    expect(countryStyle.textAlignLast).toBe("center");
+    expect(
+      Math.abs(countryStyle.paddingInlineStart - countryStyle.paddingInlineEnd)
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(countryStyle.paddingBlockStart - countryStyle.paddingBlockEnd)
+    ).toBeLessThanOrEqual(1);
+
+    await expect(page.locator(".contact-form__country-chevron")).toHaveAttribute(
+      "aria-hidden",
+      "true"
+    );
+  }
 });
 
 test("shows contact form submission feedback in the action area", async ({ page }) => {
@@ -163,14 +307,7 @@ test("shows contact form submission feedback in the action area", async ({ page 
 
   const form = page.locator(".contact-form");
   await page.getByLabel(/Email/).fill("visitor@example.com");
-  await form.evaluate((element) => {
-    const token = element.querySelector<HTMLInputElement>(
-      '[name="cf-turnstile-response"]'
-    ) ?? document.createElement("input");
-    token.name = "cf-turnstile-response";
-    token.value = "test-token";
-    if (!token.parentElement) element.append(token);
-  });
+  await injectSyntheticTurnstile(form);
 
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByRole("button", { name: "Sending your message" })).toBeDisabled();
@@ -188,6 +325,216 @@ test("shows contact form submission feedback in the action area", async ({ page 
   await form.getByRole("button", { name: "Send another message" }).click();
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(form.locator(".cf-turnstile")).toBeVisible();
+});
+
+test("formats US phone typing and preserves a middle-edit caret", async ({ page }) => {
+  await page.goto("/get-involved");
+
+  const phone = page.locator("#contact-phone");
+  await phone.pressSequentially("7025550100");
+  await expect(phone).toHaveValue("702-555-0100");
+
+  await phone.evaluate((element) => {
+    if (element instanceof HTMLInputElement) element.setSelectionRange(7, 7);
+  });
+  await phone.press("Backspace");
+  await expect(phone).toHaveValue("702-550-100");
+  expect(
+    await phone.evaluate((element) =>
+      element instanceof HTMLInputElement ? element.selectionStart : null
+    )
+  ).toBe(6);
+
+  await phone.pressSequentially("9");
+  await expect(phone).toHaveValue("702-559-0100");
+  expect(
+    await phone.evaluate((element) =>
+      element instanceof HTMLInputElement ? element.selectionStart : null
+    )
+  ).toBe(7);
+});
+
+test("formats a national phone paste for the selected country", async ({ page }) => {
+  await page.goto("/get-involved");
+
+  const phone = page.locator("#contact-phone");
+  await pasteText(phone, "7025550100");
+
+  await expect(phone).toHaveValue("702-555-0100");
+});
+
+test("submits a composed US phone in contact form data", async ({ page }) => {
+  const capture: SubmissionCapture = { phone: null };
+  await captureContactSubmission(page, capture);
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await page.locator("#contact-phone").fill("7025550100");
+  await injectSyntheticTurnstile(form);
+
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(form.locator(".contact-form__success")).toBeVisible();
+  expect(capture.phone).toBe("+1 702-555-0100");
+});
+
+test("submits an empty optional phone without a calling code", async ({ page }) => {
+  const capture: SubmissionCapture = { phone: null };
+  await captureContactSubmission(page, capture);
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await injectSyntheticTurnstile(form);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(form.locator(".contact-form__success")).toBeVisible();
+  expect(capture.phone).toBe("");
+});
+
+test("formats and submits a phone for a non-US selected country", async ({
+  page
+}) => {
+  const capture: SubmissionCapture = { phone: null };
+  await captureContactSubmission(page, capture);
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  await page.getByLabel("Country or calling code").selectOption("GB");
+  const phone = page.locator("#contact-phone");
+  await phone.pressSequentially("02079460018");
+  await expect(phone).toHaveValue("020 7946 0018");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await injectSyntheticTurnstile(form);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(form.locator(".contact-form__success")).toBeVisible();
+  expect(capture.phone).toBe("+44 20 7946 0018");
+});
+
+test("reconciles a complete non-NANP international phone paste", async ({
+  page
+}) => {
+  const capture: SubmissionCapture = { phone: null };
+  await captureContactSubmission(page, capture);
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  const phone = page.locator("#contact-phone");
+  await pasteText(phone, "+442079460018");
+
+  await expect(page.getByLabel("Country or calling code")).toHaveValue("GB");
+  await expect(phone).toHaveValue("020 7946 0018");
+  await expect(page.locator(".contact-form__phone-status")).toContainText(
+    "United Kingdom (+44)"
+  );
+  expect((await phone.inputValue()).replace(/\D/g, "")).toBe("02079460018");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await injectSyntheticTurnstile(form);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(form.locator(".contact-form__success")).toBeVisible();
+  expect(capture.phone).toBe("+44 20 7946 0018");
+});
+
+test("submits an unreconciled explicit international phone unchanged", async ({
+  page
+}) => {
+  const capture: SubmissionCapture = { phone: null };
+  await captureContactSubmission(page, capture);
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  const phone = page.locator("#contact-phone");
+  await phone.fill("+9999999");
+  await expect(phone).toHaveValue("+9999999");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await injectSyntheticTurnstile(form);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(form.locator(".contact-form__success")).toBeVisible();
+  expect(capture.phone).toBe("+9999999");
+});
+
+test("retains the selected NANP country for a +1 phone paste", async ({ page }) => {
+  await page.goto("/get-involved");
+
+  const country = page.getByLabel("Country or calling code");
+  await country.selectOption("CA");
+  const phone = page.locator("#contact-phone");
+  await pasteText(phone, "+17025550100");
+
+  await expect(country).toHaveValue("CA");
+  expect((await phone.inputValue()).replace(/\D/g, "")).toBe("7025550100");
+});
+
+test("reconciles an autofilled international phone on change", async ({ page }) => {
+  await page.goto("/get-involved");
+
+  const phone = page.locator("#contact-phone");
+  await phone.evaluate((element) => {
+    if (!(element instanceof HTMLInputElement)) return;
+    element.value = "+33142685300";
+    element.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  });
+  await expect(phone).toHaveValue("+33142685300");
+  await phone.dispatchEvent("change");
+
+  await expect(page.getByLabel("Country or calling code")).toHaveValue("FR");
+  await expect(phone).toHaveValue("01 42 68 53 00");
+  expect((await phone.inputValue()).replace(/\D/g, "")).toBe("0142685300");
+});
+
+test("resets the phone country, value, and reconciliation status", async ({
+  page
+}) => {
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  const country = page.getByLabel("Country or calling code");
+  const phone = page.locator("#contact-phone");
+  const status = page.locator(".contact-form__phone-status");
+  await pasteText(phone, "+442079460018");
+  await expect(status).not.toBeEmpty();
+
+  await form.evaluate((element) => {
+    if (element instanceof HTMLFormElement) element.reset();
+  });
+
+  await expect(country).toHaveValue("US");
+  await expect(phone).toHaveValue("");
+  await expect(status).toBeEmpty();
+});
+
+test("blocks an invalid contact phone before the API request", async ({ page }) => {
+  let contactApiCalls = 0;
+  await page.route("**/api/contact", async (route) => {
+    contactApiCalls += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Unexpected request." })
+    });
+  });
+  await page.goto("/get-involved");
+
+  const form = page.locator(".contact-form");
+  const phone = page.locator("#contact-phone");
+  await page.getByLabel(/Email/).fill("visitor@example.com");
+  await phone.fill("not-a-phone");
+  await injectSyntheticTurnstile(form);
+
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  expect(
+    await page.evaluate(
+      () =>
+        document.querySelector<HTMLInputElement>("#contact-phone")?.validity
+          .patternMismatch
+    )
+  ).toBe(true);
+  await expect(form.locator(".contact-form__success")).toBeHidden();
+  expect(contactApiCalls).toBe(0);
 });
 
 test("renders the approved location map on Who We Are", async ({ page }) => {

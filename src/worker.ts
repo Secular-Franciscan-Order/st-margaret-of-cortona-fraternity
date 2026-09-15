@@ -183,6 +183,7 @@ const handleContactRequest = async (request: Request, env: Env) => {
   const firstName = getText(formData, "first-name", 100);
   const lastName = getText(formData, "last-name", 100);
   const email = getText(formData, "email", 250).toLowerCase();
+  const phone = getText(formData, "phone", 32);
   const message = getText(formData, "message", 5_000);
   const website = getText(formData, "website", 200);
   const turnstileToken = getText(formData, "cf-turnstile-response", 2_048);
@@ -212,6 +213,7 @@ const handleContactRequest = async (request: Request, env: Env) => {
   const visitorName = [firstName, lastName].filter(Boolean).join(" ") || "Not provided";
   const safeName = escapeHtml(visitorName);
   const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone || "Not provided");
   const safeMessage = escapeHtml(message || "Not provided").replace(/\n/g, "<br>");
 
   try {
@@ -222,8 +224,8 @@ const handleContactRequest = async (request: Request, env: Env) => {
         name: "St. Margaret of Cortona Fraternity"
       },
       subject: "New contact form message",
-      text: `Name: ${visitorName}\nEmail: ${email}\n\nMessage:\n${message || "Not provided"}`,
-      html: `<h1>New contact form message</h1><p><strong>Name:</strong> ${safeName}</p><p><strong>Email:</strong> ${safeEmail}</p><p><strong>Message:</strong><br>${safeMessage}</p>`,
+      text: `Name: ${visitorName}\nEmail: ${email}\nPhone: ${phone || "Not provided"}\n\nMessage:\n${message || "Not provided"}`,
+      html: `<h1>New contact form message</h1><p><strong>Name:</strong> ${safeName}</p><p><strong>Email:</strong> ${safeEmail}</p><p><strong>Phone:</strong> ${safePhone}</p><p><strong>Message:</strong><br>${safeMessage}</p>`,
       replyTo: email
     });
   } catch {

@@ -1,4 +1,6 @@
 ---
+import PhoneField from "@/components/PhoneField.astro";
+
 const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
 ---
 
@@ -39,6 +41,8 @@ const turnstileSiteKey = "0x4AAAAAAEERQmwQp-jP4ygz";
         required
       />
     </div>
+
+    <PhoneField />
 
     <div class="contact-form__field">
       <label for="contact-message">Message</label>
