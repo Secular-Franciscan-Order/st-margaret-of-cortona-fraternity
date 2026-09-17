@@ -13,7 +13,8 @@ const env = {
   CONTACT_EMAIL: {
     send: async () => undefined
   },
-  CONTACT_RECIPIENT: "susan.kowalski@unlv.edu",
+  CONTACT_RECIPIENT: "cmalloy925@gmail.com",
+  CONTACT_SECONDARY_RECIPIENT: "susan.kowalski@unlv.edu",
   TURNSTILE_SECRET_KEY: "not-used"
 };
 
@@ -54,7 +55,7 @@ test("rejects an oversized request with an understated Content-Length", async ()
   await assert.doesNotReject(response.json());
 });
 
-test("sends a verified submission to the configured recipient", async () => {
+test("sends a verified submission to both configured recipients", async () => {
   const originalFetch = globalThis.fetch;
   const sentMessages: Array<{ to: string | { email: string; name?: string } }> = [];
 
@@ -89,7 +90,10 @@ test("sends a verified submission to the configured recipient", async () => {
     );
 
     assert.equal(response.status, 200);
-    assert.deepEqual(sentMessages, [{ to: env.CONTACT_RECIPIENT }]);
+    assert.deepEqual(sentMessages, [
+      { to: env.CONTACT_RECIPIENT },
+      { to: env.CONTACT_SECONDARY_RECIPIENT }
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
