@@ -13,7 +13,7 @@ const env = {
   CONTACT_EMAIL: {
     send: async () => undefined
   },
-  CONTACT_RECIPIENT: "cmalloy925@gmail.com",
+  CONTACT_RECIPIENT: "susan.kowalski@unlv.edu",
   TURNSTILE_SECRET_KEY: "not-used"
 };
 
