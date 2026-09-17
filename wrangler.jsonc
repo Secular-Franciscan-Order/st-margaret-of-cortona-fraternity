@@ -5,19 +5,19 @@
   "compatibility_date": "2026-06-01",
   "preview_urls": true,
   "vars": {
-    "CONTACT_RECIPIENT": "cmalloy925@gmail.com"
+    "CONTACT_RECIPIENT": "susan.kowalski@unlv.edu"
   },
   "send_email": [
     {
       "name": "CONTACT_EMAIL",
-      "destination_address": "cmalloy925@gmail.com",
+      "destination_address": "susan.kowalski@unlv.edu",
       "allowed_sender_addresses": [
         "contact@stmargaretofcortona.com"
       ]
     }
   ],
   "assets": {
-    "directory": "./dist",
+    "directory": "./dist/",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
     "html_handling": "auto-trailing-slash"
