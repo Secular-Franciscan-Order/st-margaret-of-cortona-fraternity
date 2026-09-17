@@ -216,9 +216,9 @@ const handleContactRequest = async (request: Request, env: Env) => {
   const safeMessage = escapeHtml(message || "Not provided").replace(/\n/g, "<br>");
   const recipients = [env.CONTACT_RECIPIENT, env.CONTACT_SECONDARY_RECIPIENT];
 
-  try {
-    await Promise.all(
-      recipients.map((to) =>
+  const deliveryResults = await Promise.allSettled(
+    recipients.map((to) =>
+      Promise.resolve().then(() =>
         env.CONTACT_EMAIL.send({
           to,
           from: {
@@ -231,8 +231,10 @@ const handleContactRequest = async (request: Request, env: Env) => {
           replyTo: email
         })
       )
-    );
-  } catch {
+    )
+  );
+
+  if (deliveryResults.every((result) => result.status === "rejected")) {
     return json(
       { message: "We could not send your message. Please try again or use the contact details above." },
       500
