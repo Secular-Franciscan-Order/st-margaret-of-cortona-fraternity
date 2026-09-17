@@ -22,6 +22,7 @@ interface Env {
   ASSETS: AssetFetcher;
   CONTACT_EMAIL: ContactEmail;
   CONTACT_RECIPIENT: string;
+  CONTACT_SECONDARY_RECIPIENT: string;
   TURNSTILE_SECRET_KEY: string;
 }
 
@@ -213,20 +214,27 @@ const handleContactRequest = async (request: Request, env: Env) => {
   const safeName = escapeHtml(visitorName);
   const safeEmail = escapeHtml(email);
   const safeMessage = escapeHtml(message || "Not provided").replace(/\n/g, "<br>");
+  const recipients = [env.CONTACT_RECIPIENT, env.CONTACT_SECONDARY_RECIPIENT];
 
-  try {
-    await env.CONTACT_EMAIL.send({
-      to: env.CONTACT_RECIPIENT,
-      from: {
-        email: "contact@stmargaretofcortona.com",
-        name: "St. Margaret of Cortona Fraternity"
-      },
-      subject: "New contact form message",
-      text: `Name: ${visitorName}\nEmail: ${email}\n\nMessage:\n${message || "Not provided"}`,
-      html: `<h1>New contact form message</h1><p><strong>Name:</strong> ${safeName}</p><p><strong>Email:</strong> ${safeEmail}</p><p><strong>Message:</strong><br>${safeMessage}</p>`,
-      replyTo: email
-    });
-  } catch {
+  const deliveryResults = await Promise.allSettled(
+    recipients.map((to) =>
+      Promise.resolve().then(() =>
+        env.CONTACT_EMAIL.send({
+          to,
+          from: {
+            email: "contact@stmargaretofcortona.com",
+            name: "St. Margaret of Cortona Fraternity"
+          },
+          subject: "New contact form message",
+          text: `Name: ${visitorName}\nEmail: ${email}\n\nMessage:\n${message || "Not provided"}`,
+          html: `<h1>New contact form message</h1><p><strong>Name:</strong> ${safeName}</p><p><strong>Email:</strong> ${safeEmail}</p><p><strong>Message:</strong><br>${safeMessage}</p>`,
+          replyTo: email
+        })
+      )
+    )
+  );
+
+  if (deliveryResults.every((result) => result.status === "rejected")) {
     return json(
       { message: "We could not send your message. Please try again or use the contact details above." },
       500
